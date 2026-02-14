@@ -1,2 +1,2 @@
-root=DirectoryName[$InputFileName];
-Get[FileNameJoin[{root,"runAndLog.wl"}]];
+root = DirectoryName[$InputFileName];
+Get[FileNameJoin[{root, "runHarness.wl"}]];
