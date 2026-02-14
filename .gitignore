@@ -1,0 +1,6 @@
+# Ignore editor/OS cruft
+.DS_Store
+
+# Logs from test runs
+logs/
+logs/*.txt
