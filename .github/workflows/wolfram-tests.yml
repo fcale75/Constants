@@ -1,0 +1,17 @@
+name: Wolfram Tests
+on:
+  push:
+  pull_request:
+jobs:
+  run_wolfram_tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Run Wolfram test harness
+        uses: miRoox/wolfram-action@master
+        with:
+          file: tests/runAll.wl
+        env:
+          WOLFRAM_ID: ${{ secrets.WOLFRAM_ID }}
+          WOLFRAM_PASS: ${{ secrets.WOLFRAM_PASS }}
