@@ -1,0 +1,162 @@
+Constants Project — Authoritative Specification
+
+Version 1.0 — Initial Plan
+
+1. Authoritative source
+
+Paper: [insert full citation here]
+TeX source located in directory: paper/Paper.tex
+TeX source and pdf also available here: https://arxiv.org/abs/2602.07292
+
+All mathematical definitions and algorithms must match the TeX source exactly.
+
+2. Computational environment
+
+All core computation is implemented in Wolfram Language (Mathematica).
+
+Programs are executed from the terminal using wolframscript.
+
+All numerical computation uses arbitrary precision arithmetic.
+
+Machine precision arithmetic is not permitted in objective, gradient, Hessian, or asymptotic evaluation.
+
+3. Overall goal
+
+Compute the constant defined in the paper by optimizing a coefficient vector a of length P subject to the constraint that the sum of a_j equals 1.
+
+4. Mathematical structure
+
+Define Fhat(k) to be one half times the sum over j from 0 to P-1 of a_j times B(j,k).
+
+Define B(p,k) to be J_p(pi*k/2) times p! times (4/(pi*k))^p, where J_p is the Bessel J function.
+
+Define the objective C(a) to be one half plus the sum over k from 1 to infinity of (Fhat(k))^4.
+
+5. Summation strategy
+
+The infinite sum is computed using a Kummer-type transform.
+
+Split the sum into:
+
+Exact sum from k = 1 to N.
+
+Asymptotic approximation from k = N+1 to infinity.
+
+Remainder term bounded using Hurwitz zeta.
+
+Asymptotic expansions must be computed separately for each residue class modulo 4 because of the period-4 structure of the Bessel asymptotics.
+
+Parameters:
+
+P = number of coefficients
+N = cutoff between exact and asymptotic summation
+K = number of asymptotic terms retained
+Working precision = number of digits
+
+6. Precomputation
+
+Before optimization:
+
+Precompute B(p,k) for 0 <= p <= P-1 and 1 <= k <= N.
+
+Precompute asymptotic expansions of B(p,k) for large k for each residue class modulo 4.
+
+Precompute necessary Hurwitz zeta values.
+
+Precompute powers of N required for truncation bounds.
+
+All precomputed data must be cached and reused.
+
+7. Optimization method
+
+Use Newton–Raphson with a Lagrange multiplier enforcing that the sum of a_j equals 1.
+
+At each iteration:
+
+Compute Fhat(k).
+Compute expansions for Fhat(k)^2, Fhat(k)^3, and Fhat(k)^4.
+Compute gradient of C(a).
+Compute Hessian of C(a).
+Solve the constrained Newton linear system.
+Update a.
+Stop when the gradient norm is below tolerance.
+
+No gradient descent.
+No random restarts.
+
+8. Bootstrapping in P
+
+Begin with small P, for example P = 4.
+
+For each P:
+
+Solve the optimization problem.
+Increase P.
+Extend the previous solution by appending zeros.
+Use the extended vector as the initial guess.
+
+Continue until the target P is reached.
+
+9. Bootstrapping in N and precision
+
+For each P:
+
+Choose N large enough to control truncation error.
+Choose K large enough for asymptotic accuracy.
+Choose working precision appropriate for the desired accuracy.
+
+As P increases:
+
+Increase N if necessary.
+Increase K if necessary.
+Increase working precision gradually.
+
+Final reported parameters in the paper:
+
+P = 101
+N = 8192
+K = 128
+Precision approximately 384 digits
+
+Goal of current computation:
+P = 1001
+
+10. Lower bound computation
+
+Given optimal a:
+
+Will want a text file with a list of the cofficients to the given level
+of numerical accuracy.
+
+11. Project structure
+
+Directory layout:
+
+paper/ contains TeX source of the paper.
+spec/ contains this specification file.
+src/ contains Wolfram Language source files.
+tools/ may contain auxiliary scripts if needed.
+
+Primary entry point:
+
+src/driver.wl executed via wolframscript.
+
+12. Modifications and Extensions
+
+Any deviation, refinement, optimization, or experimental change must be added in this section without altering the Initial Plan above.
+
+The Initial Plan remains the canonical implementation doctrine.
+
+
+13. Level of programming skill of user
+
+The user has advanced mathematical knowledge, but limited programming capabilities.
+The user wants to limit any direct editing of the relevant files on a line by line basis to avoid both introducing errors but also because they want the project automated.
+
+
+14. First key step
+
+The first major goal is to run is to acheive suitable numerical results for small values of N, say N up to 10.
+
+
+15. Numerical Observations. If the coefficients are given by a_n, then it appears from the paper that a_n is well approximated by the formula C*(-1)^n/(8^n * (n+1)) for a constant C and particularly for n not at the extreme range of values of n in [0..,N]. This might allow for some numerical check of any final answer. For example, the an should be approximately decreasing, and should also be approximately alternating. However, these observations should explicitly *NOT* be built into the model, they are simply there as possible future checks.
