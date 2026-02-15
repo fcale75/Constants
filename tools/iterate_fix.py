@@ -7,15 +7,18 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 TEST_FILE = ROOT / "tests" / "runAll.wl"
 SUMMARY_FILE = ROOT / "logs" / "latest_summary.txt"
 
-
 def run_once():
-    proc = subprocess.run(
-        ["wolframscript", "-file", str(TEST_FILE)],
-        cwd=ROOT,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-    )
+    try:
+        proc = subprocess.run(
+            ["wolframscript", "-file", str(TEST_FILE)],
+            cwd=ROOT,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=120,
+        )
+    except subprocess.TimeoutExpired as e:
+        return 124, {}, (e.output or "") + "\n[timed out after 120s]"
 
     summary = {}
     if SUMMARY_FILE.exists():
@@ -23,9 +26,7 @@ def run_once():
             if "=" in line:
                 k, v = line.split("=", 1)
                 summary[k.strip()] = v.strip()
-
     return proc.returncode, summary, proc.stdout
-
 
 def main():
     status, summary, stdout = run_once()
