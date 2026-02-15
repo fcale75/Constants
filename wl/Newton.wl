@@ -31,7 +31,7 @@ NewtonStep[a_List, lambda_, pmax_Integer, nmax_Integer] := Module[{d,ones,M,rhs,
   rhs = Join[-d["res"], {1-Total[a]}];
   sol = LinearSolve[M, rhs];
   da = sol[[;;pmax]]; dl = sol[[pmax+1]];
-  {a + da, lambda + dl}
+  <|"deltaA"->da,"deltaLambda"->dl,"aNext"->a+da,"lambdaNext"->lambda+dl|>
 ];
 
 End[];
