@@ -24,3 +24,7 @@ This loads all harnesses: `runTests`, `newtonTests`, `driverTests`, `tailTests`.
 - Integrate tail derivative terms into the main driver path (fully tail-aware Newton loop).
 - Improve precision strategy & stability diagnostics (condition numbers, damping, stopping criteria).
 - Parameterize K, P, N schedule and add reproducible seed/logging for debugging runs.
+
+## Note (2026-02-15)
+We had a multi-hour period with no commits and no WL harness updates. Future workflow should rely on small, verifiable commits and CI/log artifacts rather than assumed background work.
+
