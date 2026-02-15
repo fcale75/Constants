@@ -1,10 +1,12 @@
-Needs["Constants`"];
-Needs["Constants`Driver`"];
 (* runHarness.wl - orchestrated test run and summary *)
-
 files = Select[{ $InputFileName, $ScriptName, Directory[] }, StringQ];
 base = First[files];
 repoRoot = DirectoryName[DirectoryName[base]];
+
+AppendTo[$Path, FileNameJoin[{repoRoot, "wl"}]];
+Needs["Constants`"];
+Needs["Constants`Driver`"];
+
 logsDir = FileNameJoin[{repoRoot, "logs"}];
 If[!DirectoryQ[logsDir], CreateDirectory[logsDir]];
 
