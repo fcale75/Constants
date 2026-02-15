@@ -18,7 +18,8 @@ def run_once():
             timeout=120,
         )
     except subprocess.TimeoutExpired as e:
-        return 124, {}, (e.output or "") + "\n[timed out after 120s]"
+
+	return 124, {}, (e.output.decode("utf-8", errors="ignore") if isinstance(e.output, bytes) else (e.output or "")) + "\n[timed out after 120s]"
 
     summary = {}
     if SUMMARY_FILE.exists():
