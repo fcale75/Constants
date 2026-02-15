@@ -1,9 +1,9 @@
 (* Driver.wl - simple Newton iteration harness *)
-BeginPackage["Constants`Driver`"]; NewtonOptimize;
+BeginPackage["Constants`Driver`"];
+NewtonOptimize;
 Begin["`Private`"];
-Needs["Constants`Heartbeat`"];
+Needs["Constants`"];
 Needs["Constants`Newton`"];
-
 Options[NewtonOptimize] = { MaxIterations -> 20, Tolerance -> 10^-25, Log -> True };
 
 NewtonOptimize[pmax_Integer?Positive, nmax_Integer?Positive, opts : OptionsPattern[]] :=
