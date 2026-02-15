@@ -4,6 +4,12 @@ base = First[files];
 repoRoot = DirectoryName[DirectoryName[base]];
 
 AppendTo[$Path, FileNameJoin[{repoRoot, "wl"}]];
+
+
+Needs["Constants`"];
+Needs["Constants`Newton`"];
+Needs["Constants`Driver`"];
+
 Get[FileNameJoin[{repoRoot, "wl", "Constants.wl"}]];
 Get[FileNameJoin[{repoRoot, "wl", "Driver.wl"}]];
 
