@@ -1,3 +1,5 @@
+Needs["Constants`"];
+Needs["Constants`Driver`"];
 (* runHarness.wl - orchestrated test run and summary *)
 
 files = Select[{ $InputFileName, $ScriptName, Directory[] }, StringQ];
