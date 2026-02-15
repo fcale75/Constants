@@ -4,7 +4,7 @@ import pathlib
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-TEST_FILE = ROOT / "tests" / "runAll.wl"
+TEST_FILE = ROOT / "tests" / "runAll.wl" 
 SUMMARY_FILE = ROOT / "logs" / "latest_summary.txt"
 
 def run_once():
