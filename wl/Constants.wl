@@ -62,6 +62,9 @@ If[!ValueQ[$ConstantsN], $ConstantsN = 20];
 If[!ValueQ[$ConstantsK], $ConstantsK = 4];
 
 If[!ValueQ[$ConstantsBesselBlockCache], $ConstantsBesselBlockCache = <||>];
+If[!ValueQ[$ConstantsAsymptCoeffCache], $ConstantsAsymptCoeffCache = <||>];
+If[!ValueQ[$ConstantsCosThetaCache], $ConstantsCosThetaCache = <||>];
+If[!ValueQ[$ConstantsSinThetaCache], $ConstantsSinThetaCache = <||>];
 
 ConstantsSetPrecision[prec_Integer?Positive] := Module[{},
   $ConstantsWorkingPrecision = prec;
@@ -75,7 +78,9 @@ ConstantsSetParameters[{p_Integer?Positive, n_Integer?Positive, k_Integer?NonNeg
 
 ConstantsClearCaches[] := Module[{},
   $ConstantsBesselBlockCache = <||>;
-  ClearAll[AsymptCoeff, CosTheta, SinTheta];
+  $ConstantsAsymptCoeffCache = <||>;
+  $ConstantsCosThetaCache = <||>;
+  $ConstantsSinThetaCache = <||>;
   Null
 ];
 
@@ -96,7 +101,7 @@ ClearAll[BesselBlock];
 
 BesselBlock[p_Integer?NonNegative, k_Integer?Positive] := Module[
   {prec = $ConstantsWorkingPrecision, key, cached, z, val},
-  key = {p, k, prec};
+  key = ToString[{p, k, prec}, InputForm];
   cached = Lookup[$ConstantsBesselBlockCache, key, Missing["NotFound"]];
   If[cached =!= Missing["NotFound"], Return[cached]];
 
@@ -114,23 +119,41 @@ BesselBlock[p_Integer?NonNegative, k_Integer?Positive] := Module[
 ClearAll[AsymptCoeff];
 
 (* a_n(p) = Product_{j=1..n} (4 p^2 - (2j-1)^2) / (8^n n!)  *)
-AsymptCoeff[p_Integer?NonNegative, n_Integer?NonNegative] :=
-  AsymptCoeff[p, n] =
-    If[n == 0,
-      1,
-      Product[4 p^2 - (2 j - 1)^2, {j, 1, n}] / (8^n * n!)
-    ];
+AsymptCoeff[p_Integer?NonNegative, n_Integer?NonNegative] := Module[
+  {key = {p, n}, cached, val},
+  key = ToString[{p, n}, InputForm];
+  cached = Lookup[$ConstantsAsymptCoeffCache, key, Missing["NotFound"]];
+  If[cached =!= Missing["NotFound"], Return[cached]];
+
+  val = If[n == 0, 1, Product[4 p^2 - (2 j - 1)^2, {j, 1, n}] / (8^n * n!)];
+  $ConstantsAsymptCoeffCache[key] = val;
+  val
+];
 
 (* For k = 4n + r, reduce theta = pi k/2 - p pi/2 - pi/4 mod 2pi. *)
 ClearAll[CosTheta, SinTheta];
 
-CosTheta[r_Integer?NonNegative, p_Integer?NonNegative] :=
-  CosTheta[r, p] =
-    Cos[Pi*r/2]*Cos[(2 p + 1) Pi/4] + Sin[Pi*r/2]*Sin[(2 p + 1) Pi/4];
+CosTheta[r_Integer?NonNegative, p_Integer?NonNegative] := Module[
+  {key = {r, p}, cached, val},
+  key = ToString[{r, p}, InputForm];
+  cached = Lookup[$ConstantsCosThetaCache, key, Missing["NotFound"]];
+  If[cached =!= Missing["NotFound"], Return[cached]];
 
-SinTheta[r_Integer?NonNegative, p_Integer?NonNegative] :=
-  SinTheta[r, p] =
-    Sin[Pi*r/2]*Cos[(2 p + 1) Pi/4] - Cos[Pi*r/2]*Sin[(2 p + 1) Pi/4];
+  val = Cos[Pi*r/2]*Cos[(2 p + 1) Pi/4] + Sin[Pi*r/2]*Sin[(2 p + 1) Pi/4];
+  $ConstantsCosThetaCache[key] = val;
+  val
+];
+
+SinTheta[r_Integer?NonNegative, p_Integer?NonNegative] := Module[
+  {key = {r, p}, cached, val},
+  key = ToString[{r, p}, InputForm];
+  cached = Lookup[$ConstantsSinThetaCache, key, Missing["NotFound"]];
+  If[cached =!= Missing["NotFound"], Return[cached]];
+
+  val = Sin[Pi*r/2]*Cos[(2 p + 1) Pi/4] - Cos[Pi*r/2]*Sin[(2 p + 1) Pi/4];
+  $ConstantsSinThetaCache[key] = val;
+  val
+];
 
 (* Prefactor for BesselBlock(p,k) after pulling out k^{-p-1/2} *)
 ClearAll[PrefactorExact];
@@ -196,7 +219,7 @@ ObjectiveTailCoeff[s_List, K_Integer?NonNegative] := Module[{x, poly},
 
 ClearAll[TailObjective];
 
-TailObjective[a_List, N_Integer?Positive, K_Integer?NonNegative] := Module[
+TailObjective[a_List, Nmax_Integer?Positive, K_Integer?NonNegative] := Module[
   {prec = $ConstantsWorkingPrecision, sum = 0, r, s, c, u, sExp, first, n0},
 
   Do[
@@ -205,7 +228,7 @@ TailObjective[a_List, N_Integer?Positive, K_Integer?NonNegative] := Module[
 
     Do[
       sExp = 2 + u;                  (* because Sk^4 has leading k^{-2} *)
-      first = N + 1;                 (* first index strictly greater than N *)
+      first = Nmax + 1;              (* first index strictly greater than Nmax *)
       n0 = Ceiling[(first - r)/4];   (* smallest n with k = 4n+r > N *)
 
       sum += N[
@@ -220,13 +243,12 @@ TailObjective[a_List, N_Integer?Positive, K_Integer?NonNegative] := Module[
 
 ClearAll[Objective];
 
-Objective[a_List, N_Integer : $ConstantsN, K_Integer : $ConstantsK] := Module[
+Objective[a_List, Nmax_Integer : $ConstantsN, K_Integer : $ConstantsK] := Module[
   {prec = $ConstantsWorkingPrecision, Cfinite, Ctail},
-  Cfinite = N[1/2 + Sum[Sk[a, k]^4, {k, 1, N}], prec];
-  Ctail = TailObjective[a, N, K];
+  Cfinite = N[1/2 + Sum[Sk[a, k]^4, {k, 1, Nmax}], prec];
+  Ctail = TailObjective[a, Nmax, K];
   Cfinite + Ctail
 ];
 
 End[];
 EndPackage[];
-

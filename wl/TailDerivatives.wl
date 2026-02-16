@@ -9,12 +9,12 @@
 BeginPackage["Constants`TailDerivatives`"];
 
 TailGradient::usage =
-  "TailGradient[a,N,K] returns the tail contribution to the gradient of \
-C(a)=1/2+Sum_{k>=1} Sk[a,k]^4 for k>N, using the mod-4 asymptotic series.";
+  "TailGradient[a,Nmax,K] returns the tail contribution to the gradient of \
+C(a)=1/2+Sum_{k>=1} Sk[a,k]^4 for k>Nmax, using the mod-4 asymptotic series.";
 
 TailHessian::usage =
-  "TailHessian[a,N,K] returns the tail contribution to the Hessian of \
-C(a)=1/2+Sum_{k>=1} Sk[a,k]^4 for k>N, using the mod-4 asymptotic series.";
+  "TailHessian[a,Nmax,K] returns the tail contribution to the Hessian of \
+C(a)=1/2+Sum_{k>=1} Sk[a,k]^4 for k>Nmax, using the mod-4 asymptotic series.";
 
 Begin["`Private`"];
 
@@ -39,7 +39,7 @@ convolve[a_List, b_List, K_Integer?NonNegative] := Table[
 
 ClearAll[TailGradient];
 
-TailGradient[a_List, N_Integer?Positive, K_Integer?NonNegative] := Module[
+TailGradient[a_List, Nmax_Integer?Positive, K_Integer?NonNegative] := Module[
   {prec = Constants`Private`$ConstantsWorkingPrecision, P = Length[a], grad,
    r, sk, sk3, n0, l, Jl, coeffs, u},
 
@@ -48,7 +48,7 @@ TailGradient[a_List, N_Integer?Positive, K_Integer?NonNegative] := Module[
   Do[
     sk = Constants`SkSeriesCoefficients[a, r, K];
     sk3 = powSeries[sk, 3, K];
-    n0 = Ceiling[(N + 1 - r)/4];
+    n0 = Ceiling[(Nmax + 1 - r)/4];
 
     Do[
       Jl = Constants`SkSeriesCoefficients[UnitVector[P, l + 1], r, K];
@@ -68,7 +68,7 @@ TailGradient[a_List, N_Integer?Positive, K_Integer?NonNegative] := Module[
 
 ClearAll[TailHessian];
 
-TailHessian[a_List, N_Integer?Positive, K_Integer?NonNegative] := Module[
+TailHessian[a_List, Nmax_Integer?Positive, K_Integer?NonNegative] := Module[
   {prec = Constants`Private`$ConstantsWorkingPrecision, P = Length[a], hess,
    r, sk, sk2, n0, i, l, Ji, Jl, prod, u},
 
@@ -77,7 +77,7 @@ TailHessian[a_List, N_Integer?Positive, K_Integer?NonNegative] := Module[
   Do[
     sk = Constants`SkSeriesCoefficients[a, r, K];
     sk2 = powSeries[sk, 2, K];
-    n0 = Ceiling[(N + 1 - r)/4];
+    n0 = Ceiling[(Nmax + 1 - r)/4];
 
     Do[
       Ji = Constants`SkSeriesCoefficients[UnitVector[P, i + 1], r, K];
@@ -102,4 +102,3 @@ TailHessian[a_List, N_Integer?Positive, K_Integer?NonNegative] := Module[
 
 End[];
 EndPackage[];
-

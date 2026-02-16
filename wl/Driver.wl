@@ -12,7 +12,7 @@
 BeginPackage["Constants`Driver`"];
 
 NewtonOptimize::usage =
-  "NewtonOptimize[P,N,opts] runs a constrained Newton method for minimizing \
+  "NewtonOptimize[P,Nmax,opts] runs a constrained Newton method for minimizing \
 C(a)=1/2+Sum_{k>=1} Sk[a,k]^4 with the constraint Total[a]==1. \
 By default it uses the mod-4 accelerated tail (UseTail->True).";
 
@@ -45,13 +45,13 @@ Options[NewtonOptimize] = {
 (* ------------------------------------------------------------------------- *)
 
 ClearAll[fullDerivatives];
-fullDerivatives[a_List, P_Integer?Positive, N_Integer?Positive, K_Integer?NonNegative, lambda_] := Module[
+fullDerivatives[a_List, P_Integer?Positive, Nmax_Integer?Positive, K_Integer?NonNegative, lambda_] := Module[
   {prec = Constants`Private`$ConstantsWorkingPrecision, rep, objTail, gTail, hTail},
-  rep = Constants`Newton`NewtonDerivatives[a, P, N, lambda];
+  rep = Constants`Newton`NewtonDerivatives[a, P, Nmax, lambda];
 
-  objTail = Constants`TailObjective[a, N, K];
-  gTail = Constants`TailDerivatives`TailGradient[a, N, K];
-  hTail = Constants`TailDerivatives`TailHessian[a, N, K];
+  objTail = Constants`TailObjective[a, Nmax, K];
+  gTail = Constants`TailDerivatives`TailGradient[a, Nmax, K];
+  hTail = Constants`TailDerivatives`TailHessian[a, Nmax, K];
 
   rep["objective"] = N[rep["objective"] + objTail, prec];
   rep["gpart"] = N[rep["gpart"] + gTail, prec];
@@ -81,17 +81,17 @@ kktStepFromReport[rep_Association, a_List] := Module[
 ];
 
 ClearAll[currentObjective];
-currentObjective[a_List, P_Integer?Positive, N_Integer?Positive, K_Integer?NonNegative, useTail_] :=
+currentObjective[a_List, P_Integer?Positive, Nmax_Integer?Positive, K_Integer?NonNegative, useTail_] :=
   If[TrueQ[useTail],
-    Constants`Objective[a, N, K],
-    Constants`Newton`NewtonObjective[a, P, N]
+    Constants`Objective[a, Nmax, K],
+    Constants`Newton`NewtonObjective[a, P, Nmax]
   ];
 
 (* ------------------------------------------------------------------------- *)
 (* Main driver                                                                *)
 (* ------------------------------------------------------------------------- *)
 
-NewtonOptimize[P_Integer?Positive, N_Integer?Positive, opts : OptionsPattern[]] := Module[
+NewtonOptimize[P_Integer?Positive, Nmax_Integer?Positive, opts : OptionsPattern[]] := Module[
   {maxIt = OptionValue[MaxIterations],
    tol = OptionValue[Tolerance],
    cTol = OptionValue[ConstraintTolerance],
@@ -110,7 +110,6 @@ NewtonOptimize[P_Integer?Positive, N_Integer?Positive, opts : OptionsPattern[]] 
    resNorm, conNorm, history, aTry, lambdaTry},
 
   If[precOpt =!= Automatic, ConstantsSetPrecision[precOpt]];
-
   Kval = If[Kopt === Automatic, Constants`Private`$ConstantsK, Kopt];
 
   a = If[a0 === Automatic,
@@ -124,8 +123,8 @@ NewtonOptimize[P_Integer?Positive, N_Integer?Positive, opts : OptionsPattern[]] 
   (* Initialize lambda sensibly: mean gradient makes res have mean ~ 0. *)
   If[lambda0 === Automatic,
     rep = If[useTail,
-      fullDerivatives[a, P, N, Kval, 0],
-      Constants`Newton`NewtonDerivatives[a, P, N, 0]
+      fullDerivatives[a, P, Nmax, Kval, 0],
+      Constants`Newton`NewtonDerivatives[a, P, Nmax, 0]
     ];
     lambda = Mean[rep["gpart"]],
     lambda = lambda0
@@ -137,8 +136,8 @@ NewtonOptimize[P_Integer?Positive, N_Integer?Positive, opts : OptionsPattern[]] 
     Heartbeat["Newton iter " <> ToString[it]];
 
     rep = If[useTail,
-      fullDerivatives[a, P, N, Kval, lambda],
-      Constants`Newton`NewtonDerivatives[a, P, N, lambda]
+      fullDerivatives[a, P, Nmax, Kval, lambda],
+      Constants`Newton`NewtonDerivatives[a, P, Nmax, lambda]
     ];
 
     obj0 = rep["objective"];
@@ -161,7 +160,7 @@ NewtonOptimize[P_Integer?Positive, N_Integer?Positive, opts : OptionsPattern[]] 
       |>];
     ];
 
-    If[Max[resNorm, conNorm] < tol && conNorm < cTol,
+    If[resNorm < tol && conNorm < cTol,
       If[logQ, Print["converged"]];
       Return[<|
         "aFinal" -> a,
@@ -170,7 +169,7 @@ NewtonOptimize[P_Integer?Positive, N_Integer?Positive, opts : OptionsPattern[]] 
         "report" -> rep,
         "iterations" -> it,
         "history" -> If[returnHistory, history, Missing["NotRequested"]],
-        "params" -> <|"P" -> P, "N" -> N, "K" -> Kval, "useTail" -> useTail|>
+        "params" -> <|"P" -> P, "N" -> Nmax, "K" -> Kval, "useTail" -> useTail|>
       |>];
     ];
 
@@ -184,7 +183,7 @@ NewtonOptimize[P_Integer?Positive, N_Integer?Positive, opts : OptionsPattern[]] 
       While[t >= stepMin,
         aTry = a + t*da;
         lambdaTry = lambda + t*dl;
-        objTry = currentObjective[aTry, P, N, Kval, useTail];
+        objTry = currentObjective[aTry, P, Nmax, Kval, useTail];
 
         If[objTry < obj0, Break[]];
         t = t/2;
@@ -203,8 +202,8 @@ NewtonOptimize[P_Integer?Positive, N_Integer?Positive, opts : OptionsPattern[]] 
 
   (* Return best available after max iterations. *)
   rep = If[useTail,
-    fullDerivatives[a, P, N, Kval, lambda],
-    Constants`Newton`NewtonDerivatives[a, P, N, lambda]
+    fullDerivatives[a, P, Nmax, Kval, lambda],
+    Constants`Newton`NewtonDerivatives[a, P, Nmax, lambda]
   ];
 
   <|
@@ -214,10 +213,9 @@ NewtonOptimize[P_Integer?Positive, N_Integer?Positive, opts : OptionsPattern[]] 
     "report" -> rep,
     "iterations" -> maxIt,
     "history" -> If[returnHistory, history, Missing["NotRequested"]],
-    "params" -> <|"P" -> P, "N" -> N, "K" -> Kval, "useTail" -> useTail|>
+    "params" -> <|"P" -> P, "N" -> Nmax, "K" -> Kval, "useTail" -> useTail|>
   |>
 ];
 
 End[];
 EndPackage[];
-

@@ -81,8 +81,12 @@ obj = Quiet @ Check[Objective[a0, NMax, K], $Failed];
 gFin = Quiet @ Check[Constants`Newton`NewtonDerivatives[a0, P, NMax, 0]["gpart"], $Failed];
 gTail = Quiet @ Check[Constants`TailDerivatives`TailGradient[a0, NMax, K], $Failed];
 
-(* If anything is $Failed, treat as a harness failure. *)
-smokeOK = And[obj =!= $Failed, gFin =!= $Failed, gTail =!= $Failed];
+(* Require fully numeric outputs (not symbolic leftovers). *)
+smokeOK = And[
+  NumericQ[obj],
+  VectorQ[gFin, NumericQ] && Length[gFin] == P,
+  VectorQ[gTail, NumericQ] && Length[gTail] == P
+];
 
 summary =
   "failCount=" <> ToString[failCount] <> "\n" <>
@@ -97,4 +101,3 @@ Print["Summary:"];
 Print[summary];
 
 Exit[If[failCount === 0 && smokeOK, 0, 1]];
-
