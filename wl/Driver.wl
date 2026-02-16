@@ -6,8 +6,12 @@ Needs["Constants`"];
 Needs["Constants`Newton`"];
 Options[NewtonOptimize] = { MaxIterations -> 20, Tolerance -> 10^-25, Log -> True };
 
+a = Normalize[Table[(-1)^n/(8^n*(n+1)), {n,0,pmax-1}], Total];
+lambda = 0; …
+
+
 NewtonOptimize[pmax_Integer?Positive, nmax_Integer?Positive, opts : OptionsPattern[]] :=
- Module[{a = ConstantArray[1/pmax, pmax], lambda = 0, report, step,
+ Module[{a = Normalize[Table[(-1)^n/(8^n*(n+1)), {n, 0, pmax - 1}], Total], lambda = 0, report, step,
    maxIt = OptionValue[MaxIterations],
    tol = OptionValue[Tolerance], it},
   Do[
