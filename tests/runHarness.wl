@@ -1,17 +1,13 @@
 (* runHarness.wl
-   Orchestrated test run + a small optimization smoke test.
-
-   Designed to be executed via:
-     wolframscript -file tests/runAll.wl
+   Fast, deterministic harness: run unit tests, then do a cheap smoke check
+   (no Newton iterations).
 *)
 
 root = DirectoryName[ExpandFileName[$InputFileName]];
 repoRoot = DirectoryName[root];
 
-(* Ensure package path includes wl/ *)
 AppendTo[$Path, FileNameJoin[{repoRoot, "wl"}]];
 
-(* Load core packages explicitly (tests also Get these, but this avoids path issues). *)
 Get[FileNameJoin[{repoRoot, "wl", "Constants.wl"}]];
 Get[FileNameJoin[{repoRoot, "wl", "Newton.wl"}]];
 Get[FileNameJoin[{repoRoot, "wl", "TailDerivatives.wl"}]];
@@ -25,16 +21,29 @@ logPath = FileNameJoin[{logsDir, "runHarness_" <> timestamp <> ".txt"}];
 sumPath = FileNameJoin[{logsDir, "latest_summary.txt"}];
 
 log = OpenWrite[logPath];
-logPrint[args__] := WriteString[log, ToString[Row[{args}], OutputForm] <> "\n"];
+logPrint[args__] := (WriteString[log, ToString[Row[{args}], OutputForm] <> "\n"]; Flush[log];);
+stdoutLine[msg_] := (WriteString[$Output, msg <> "\n"]; Flush[$Output];);
 
 reports = {};
-
 $ConstantsTestRunner = True;
 
+stdoutLine["[1/4] runTests.wl"];
 Block[{Print = logPrint},
   AppendTo[reports, Quiet @ Check[Get[FileNameJoin[{repoRoot, "tests", "runTests.wl"}]], $Failed]];
+];
+
+stdoutLine["[2/4] newtonTests.wl"];
+Block[{Print = logPrint},
   AppendTo[reports, Quiet @ Check[Get[FileNameJoin[{repoRoot, "tests", "newtonTests.wl"}]], $Failed]];
+];
+
+stdoutLine["[3/4] driverTests.wl"];
+Block[{Print = logPrint},
   AppendTo[reports, Quiet @ Check[Get[FileNameJoin[{repoRoot, "tests", "driverTests.wl"}]], $Failed]];
+];
+
+stdoutLine["[4/4] tailTests.wl"];
+Block[{Print = logPrint},
   AppendTo[reports, Quiet @ Check[Get[FileNameJoin[{repoRoot, "tests", "tailTests.wl"}]], $Failed]];
 ];
 
@@ -48,39 +57,37 @@ failCounts = Table[
   {r, reports}
 ];
 
-failCount = Total[failCounts];
+(* If any test file failed to even return a TestReportObject, count it as a failure. *)
+failCount = Total[Replace[failCounts, Infinity -> 1, {1}]];
 
 (* ------------------------------------------------------------------------- *)
-(* Optimization smoke test                                                     *)
+(* Smoke: single evaluation (NO Newton)                                       *)
 (* ------------------------------------------------------------------------- *)
 
-ConstantsSetPrecision[80];
+stdoutLine["[smoke] single-eval objective/derivatives"];
 
-opt = Constants`Driver`NewtonOptimize[
-  8, 32,
-  K -> 8,
-  WorkingPrecision -> 80,
-  MaxIterations -> 10,
-  Tolerance -> 10^-8,
-  ConstraintTolerance -> 10^-12,
-  Log -> False,
-  ReturnHistory -> False
-];
+ConstantsClearCaches[];
+ConstantsSetPrecision[60];
 
-aFinal = Quiet @ Check[opt["aFinal"], {}];
-lambdaFinal = Quiet @ Check[opt["lambdaFinal"], Indeterminate];
-objFinal = Quiet @ Check[opt["objective"], Indeterminate];
-resInf = Quiet @ Check[Norm[opt["report"]["res"], Infinity], Indeterminate];
-conAbs = Quiet @ Check[Abs[opt["report"]["constraint"]], Indeterminate];
+P = 8;
+N = 32;
+K = 8;
+
+a0 = Normalize[Table[(-1)^n/(8^n*(n + 1)), {n, 0, P - 1}], Total];
+a0 = a0 - (Total[a0] - 1)/P * ConstantArray[1, P];
+
+obj = Quiet @ Check[Objective[a0, N, K], $Failed];
+gFin = Quiet @ Check[Constants`Newton`NewtonDerivatives[a0, P, N, 0]["gpart"], $Failed];
+gTail = Quiet @ Check[Constants`TailDerivatives`TailGradient[a0, N, K], $Failed];
+
+(* If anything is $Failed, treat as a harness failure. *)
+smokeOK = And[obj =!= $Failed, gFin =!= $Failed, gTail =!= $Failed];
 
 summary =
   "failCount=" <> ToString[failCount] <> "\n" <>
-  "length[aFinal]=" <> ToString[Quiet @ Check[Length[aFinal], -1]] <> "\n" <>
-  "Total[aFinal]=" <> ToString[Quiet @ Check[Total[aFinal], Indeterminate], InputForm] <> "\n" <>
-  "lambdaFinal=" <> ToString[lambdaFinal, InputForm] <> "\n" <>
-  "objectiveFinal=" <> ToString[objFinal, InputForm] <> "\n" <>
-  "stationarityInfNorm=" <> ToString[resInf, InputForm] <> "\n" <>
-  "constraintAbs=" <> ToString[conAbs, InputForm] <> "\n" <>
+  "smokeOK=" <> ToString[smokeOK] <> "\n" <>
+  "objective=" <> ToString[obj, InputForm] <> "\n" <>
+  "Total[a0]=" <> ToString[Total[a0], InputForm] <> "\n" <>
   "log=" <> logPath <> "\n";
 
 Export[sumPath, summary, "String"];
@@ -88,5 +95,5 @@ Export[sumPath, summary, "String"];
 Print["Summary:"];
 Print[summary];
 
-Exit[If[failCount === 0, 0, 1]];
+Exit[If[failCount === 0 && smokeOK, 0, 1]];
 
