@@ -50,11 +50,53 @@ Runs `wolframscript -file tests/runAll.wl`, prints stdout/stderr, and prints the
 - Test scripts no longer call `Exit[]` mid-run; the orchestrator (`runHarness.wl`) controls the process exit code.
 - Fixed `tools/iterate_fix.py` syntax/structure issues.
 
-## Near-term next steps
+## Near-term next steps [Not sure if done]
 
 1. Add a "paper fidelity" regression:
    - check `u_n := 8^n (n+1) (-1)^n a_n` is approximately constant for the early coefficients.
 2. Add objective/gradient/hessian finite-difference checks at a parameter set closer to the paper (e.g. P=8, N>=128, K>=16).
 3. Add robust logging of line-search decisions, residual norms, and basic conditioning diagnostics in `Driver.wl`.
 4. Start implementing the lower-bound dual construction (Section 4 of Rechnitzer).
+
+NEXT STEPS (2026-02-16) [continuing on from above]
+
+Current observed failure mode:
+
+Running python3 tools/iterate_fix.py --timeout 60 reaches:
+[1/4] runTests.wl
+[2/4] newtonTests.wl
+[3/4] driverTests.wl
+and then times out.
+
+New harness logs (Feb 16) are only 26 bytes, containing just a heartbeat line.
+
+logs/latest_summary.txt is stale (Feb 15) because current runs time out before writing a fresh summary.
+
+Therefore the hang is occurring inside driverTests.wl, and the summary being displayed is not from the current run.
+
+Immediate structural fixes (before any math work):
+
+Make the harness always write status early.
+
+Modify tests/runHarness.wl so it writes logs/latest_summary.txt immediately at startup.
+
+Update the summary after each stage marker (runTests, newtonTests, driverTests, tailTests).
+
+Goal: latest_summary.txt must always reflect the current run, even if WL is killed.
+
+Remove expensive work from unit tests.
+
+driverTests.wl must not call NewtonOptimize or any multi-iteration optimization.
+
+Replace it with a fast “load + single evaluation” test:
+
+load packages
+
+compute Objective[a0,N,K] once
+
+compute finite gradient once
+
+compute tail gradient once
+
+Prove that the analytic gradient of the full objective (finite + tail) matches finite differences at P=4. Nothing else proceeds until that is confirmed.
 
