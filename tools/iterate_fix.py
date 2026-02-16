@@ -2,21 +2,24 @@
 """
 tools/iterate_fix.py
 
-Small controller script to run the Wolfram Language test harness:
-
+Runs:
   wolframscript -file tests/runAll.wl
 
-It prints:
-  - the wolframscript combined stdout/stderr
-  - the parsed key=value summary from logs/latest_summary.txt (if present)
+Features:
+  - Streams WL output live (no buffering)
+  - Enforces a real timeout
+  - Force-kills WL on timeout
+  - Prints parsed logs/latest_summary.txt if present
 """
 
 from __future__ import annotations
 
+import argparse
 import pathlib
 import subprocess
 import sys
-from typing import Dict, Tuple
+import time
+from typing import Dict
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -34,53 +37,70 @@ def parse_summary(text: str) -> Dict[str, str]:
     return out
 
 
-def run_once(timeout_s: int = 600) -> Tuple[int, Dict[str, str], str]:
+def run_with_timeout(timeout_s: int) -> int:
     cmd = ["wolframscript", "-file", str(TEST_FILE)]
+
     try:
-        proc = subprocess.run(
+        proc = subprocess.Popen(
             cmd,
             cwd=str(ROOT),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
+            stdout=sys.stdout,   # live streaming
+            stderr=sys.stderr,
             text=True,
-            timeout=timeout_s,
-            check=False,
         )
     except FileNotFoundError:
-        msg = (
-            "ERROR: wolframscript not found on PATH.\n"
-            "Install WolframScript (or add it to PATH) and re-run.\n"
-        )
-        return 127, {}, msg
-    except subprocess.TimeoutExpired as e:
-        out = e.stdout or ""
-        out += f"\n[timed out after {timeout_s}s]"
-        return 124, {}, out
+        print("ERROR: wolframscript not found on PATH.")
+        return 127
 
-    summary: Dict[str, str] = {}
+    deadline = time.time() + timeout_s
+
+    while True:
+        rc = proc.poll()
+        if rc is not None:
+            return rc
+
+        if time.time() >= deadline:
+            print(f"\nERROR: timed out after {timeout_s} seconds. Terminating...")
+            try:
+                proc.terminate()
+                time.sleep(1.0)
+                if proc.poll() is None:
+                    proc.kill()
+            except Exception:
+                pass
+            return 124
+
+        time.sleep(0.2)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--timeout",
+        type=int,
+        default=120,
+        help="Timeout in seconds (default 120)"
+    )
+    args = parser.parse_args()
+
+    rc = run_with_timeout(args.timeout)
+
+    print("\n=== parsed summary (logs/latest_summary.txt) ===")
+
     if SUMMARY_FILE.exists():
         try:
             summary = parse_summary(SUMMARY_FILE.read_text(errors="ignore"))
         except Exception:
             summary = {}
-
-    return proc.returncode, summary, proc.stdout
-
-
-def main() -> int:
-    status, summary, stdout = run_once()
-
-    print("=== wolframscript stdout/stderr ===")
-    print(stdout)
-
-    print("=== parsed summary (logs/latest_summary.txt) ===")
-    if summary:
-        for k in sorted(summary):
-            print(f"{k}={summary[k]}")
+        if summary:
+            for k in sorted(summary):
+                print(f"{k}={summary[k]}")
+        else:
+            print("(summary file exists but could not parse)")
     else:
         print("(no summary file)")
 
-    return status
+    return rc
 
 
 if __name__ == "__main__":
