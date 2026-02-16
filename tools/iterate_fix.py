@@ -1,47 +1,88 @@
 #!/usr/bin/env python3
-import subprocess`
+"""
+tools/iterate_fix.py
+
+Small controller script to run the Wolfram Language test harness:
+
+  wolframscript -file tests/runAll.wl
+
+It prints:
+  - the wolframscript combined stdout/stderr
+  - the parsed key=value summary from logs/latest_summary.txt (if present)
+"""
+
+from __future__ import annotations
+
 import pathlib
+import subprocess
 import sys
+from typing import Dict, Tuple
+
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-TEST_FILE = ROOT / "tests" / "runAll.wl" 
+TEST_FILE = ROOT / "tests" / "runAll.wl"
 SUMMARY_FILE = ROOT / "logs" / "latest_summary.txt"
 
-def run_once():
+
+def parse_summary(text: str) -> Dict[str, str]:
+    out: Dict[str, str] = {}
+    for line in text.splitlines():
+        if "=" not in line:
+            continue
+        k, v = line.split("=", 1)
+        out[k.strip()] = v.strip()
+    return out
+
+
+def run_once(timeout_s: int = 600) -> Tuple[int, Dict[str, str], str]:
+    cmd = ["wolframscript", "-file", str(TEST_FILE)]
     try:
         proc = subprocess.run(
-            ["wolframscript", "-file", str(TEST_FILE)],
-            cwd=ROOT,
+            cmd,
+            cwd=str(ROOT),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
-            timeout=120,
+            timeout=timeout_s,
+            check=False,
         )
+    except FileNotFoundError:
+        msg = (
+            "ERROR: wolframscript not found on PATH.\n"
+            "Install WolframScript (or add it to PATH) and re-run.\n"
+        )
+        return 127, {}, msg
     except subprocess.TimeoutExpired as e:
+        out = e.stdout or ""
+        out += f"\n[timed out after {timeout_s}s]"
+        return 124, {}, out
 
-	return 124, {}, (e.output.decode("utf-8", errors="ignore") if isinstance(e.output, bytes) else (e.output or "")) + "\n[timed out after 120s]"
-
-    summary = {}
+    summary: Dict[str, str] = {}
     if SUMMARY_FILE.exists():
-        for line in SUMMARY_FILE.read_text(errors="ignore").splitlines():
-            if "=" in line:
-                k, v = line.split("=", 1)
-                summary[k.strip()] = v.strip()
+        try:
+            summary = parse_summary(SUMMARY_FILE.read_text(errors="ignore"))
+        except Exception:
+            summary = {}
+
     return proc.returncode, summary, proc.stdout
 
-def main():
+
+def main() -> int:
     status, summary, stdout = run_once()
-    print("=== stdout ===")
+
+    print("=== wolframscript stdout/stderr ===")
     print(stdout)
-    print("=== summary ===")
+
+    print("=== parsed summary (logs/latest_summary.txt) ===")
     if summary:
-        for k, v in summary.items():
-            print(f"{k}={v}")
+        for k in sorted(summary):
+            print(f"{k}={summary[k]}")
     else:
         print("(no summary file)")
 
-    sys.exit(status)
+    return status
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
+

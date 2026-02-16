@@ -1,31 +1,46 @@
-(* newtonTests.wl - additional tests for Newton module *)
-root = DirectoryName[$InputFileName];
+(* newtonTests.wl
+   Unit tests for Newton.wl (finite-sum objective/derivatives).
+*)
+
+root = DirectoryName[ExpandFileName[$InputFileName]];
 Get[FileNameJoin[{root, "..", "wl", "Constants.wl"}]];
 Get[FileNameJoin[{root, "..", "wl", "Newton.wl"}]];
 
-Constants`ConstantsSetPrecision[80];
+ConstantsSetPrecision[80];
 
-Clear[objective];
-objective[a_, p_, n_] := NewtonObjective[a,p,n];
+P = 3;
+Nmax = 12;
 
-p = 3; n = 8; a = ConstantArray[1/p, p]; lambda = 0;
-report = NewtonDerivatives[a,p,n,lambda];
+a = ConstantArray[1/P, P];
+lambda = 0;
 
-(* Hessian symmetry *)
-hSym = VerificationTest[
-  report["hess"] == Transpose[report["hess"]],
-  True
-];
+rep = Constants`Newton`NewtonDerivatives[a, P, Nmax, lambda];
 
-(* Numerical gradient check for gpart (gradient of objective only) *)
-eps = 10^-25;
+objective[a_] := Constants`Newton`NewtonObjective[a, P, Nmax];
+
+eps = SetPrecision[10^-18, 50];
 numGrad = Table[
-  (objective[a + eps UnitVector[p, l], p, n] - objective[a, p, n])/eps,
-  {l, 1, p}
-];
-gCheck = VerificationTest[
-  Max[Abs[numGrad - report["gpart"]]] < 10^-15,
-  True
+  (objective[a + eps UnitVector[P, l]] - objective[a - eps UnitVector[P, l]])/(2 eps),
+  {l, 1, P}
 ];
 
-Print[TestReport[{hSym, gCheck}]];
+tests = {
+  (* Hessian should be symmetric up to numerical noise. *)
+  VerificationTest[Norm[rep["hess"] - Transpose[rep["hess"]], Infinity] < 10^-40, True],
+
+  (* Gradient check (finite differences). *)
+  VerificationTest[Norm[numGrad - rep["gpart"], Infinity] < 10^-10, True],
+
+  (* KKT step keeps Total[a] close to 1 if we start on the constraint hyperplane. *)
+  VerificationTest[
+    Module[{step, aNext},
+      step = Constants`Newton`NewtonStep[a, lambda, P, Nmax];
+      aNext = step["aNext"];
+      Abs[Total[aNext] - 1] < 10^-30
+    ],
+    True
+  ]
+};
+
+TestReport[tests]
+

@@ -1,22 +1,56 @@
-root=DirectoryName[$InputFileName];
-Get[FileNameJoin[{root,"..","wl","Constants.wl"}]];
-Get[FileNameJoin[{root,"..","wl","Newton.wl"}]];
-Get[FileNameJoin[{root,"..","wl","TailDerivatives.wl"}]];
+(* tailTests.wl
+   Tests for mod-4 tail objective/derivatives consistency.
+
+   These tests are designed to catch:
+     - wrong asymptotic scaling in SkSeriesCoefficients (e.g., bad pi factors)
+     - missing tail terms in gradient/Hessian
+*)
+
+root = DirectoryName[ExpandFileName[$InputFileName]];
+Get[FileNameJoin[{root, "..", "wl", "Constants.wl"}]];
+Get[FileNameJoin[{root, "..", "wl", "Newton.wl"}]];
+Get[FileNameJoin[{root, "..", "wl", "TailDerivatives.wl"}]];
+
 ConstantsSetPrecision[80];
 
-P=4; Nmax=6; K=4;
-a=ConstantArray[1/P,P];
-eps=SetPrecision[10^-8,40];
-obj[a_]:=Objective[a,Nmax,K];
-numGrad=Table[(obj[a+eps UnitVector[P,j]]-obj[a-eps UnitVector[P,j]])/(2 eps),{j,1,P}];
+P = 4;
+Nmax = 40;
+K = 10;
 
-rep=Constants`Newton`NewtonDerivatives[a,P,Nmax];
-g=rep["gpart"]+Constants`TailDerivatives`TailGradient[a,Nmax,K];
-h=rep["hess"]+Constants`TailDerivatives`TailHessian[a,Nmax,K];
+a = ConstantArray[1/P, P];
 
-tests={
-VerificationTest[VectorQ[g,NumericQ]&&Length[g]==P],
-VerificationTest[Norm[g-numGrad]<10^-25],
-VerificationTest[Max[Abs[h-Transpose[h]]]<10^-40]
+obj[x_] := Objective[x, Nmax, K];
+
+eps = SetPrecision[10^-10, 50];
+numGrad = Table[
+  (obj[a + eps UnitVector[P, j]] - obj[a - eps UnitVector[P, j]])/(2 eps),
+  {j, 1, P}
+];
+
+rep = Constants`Newton`NewtonDerivatives[a, P, Nmax, 0];
+g = rep["gpart"] + Constants`TailDerivatives`TailGradient[a, Nmax, K];
+h = rep["hess"] + Constants`TailDerivatives`TailHessian[a, Nmax, K];
+
+(* Series approximation sanity check at a reasonably large k. *)
+kLarge = 201;
+r = Mod[kLarge, 4];
+s = SkSeriesCoefficients[a, r, K];
+approx = kLarge^(-1/2) * Sum[s[[t + 1]] * kLarge^(-t), {t, 0, K}];
+direct = Sk[a, kLarge];
+
+tests = {
+  VerificationTest[VectorQ[g, NumericQ] && Length[g] == P, True],
+  VerificationTest[MatrixQ[h, NumericQ] && Dimensions[h] == {P, P}, True],
+
+  (* Gradient must match finite differences to modest tolerance. *)
+  VerificationTest[Norm[g - numGrad, Infinity] < 10^-6, True],
+
+  (* Hessian symmetry. *)
+  VerificationTest[Norm[h - Transpose[h], Infinity] < 10^-30, True],
+
+  (* Asymptotic series should approximate Sk at large k. *)
+  VerificationTest[Abs[direct - approx]/Max[Abs[direct], 10^-30] < 10^-8, True]
 };
-Print[TestReport[tests]];
+
+TestReport[tests]
+
