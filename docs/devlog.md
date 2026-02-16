@@ -100,3 +100,23 @@ compute tail gradient once
 
 Prove that the analytic gradient of the full objective (finite + tail) matches finite differences at P=4. Nothing else proceeds until that is confirmed.
 
+(user says: most of this wasn't done).
+
+=== WORKFLOW REQUIREMENT (2026-02-16) ===
+
+All future development sessions MUST begin in a tool-enabled workspace
+(agent/workspace mode with repository attached).
+
+Requirements:
+1. The assistant must confirm write access to the repo.
+2. The assistant must load and read:
+   - docs/devlog.md
+   - spec/SPEC.txt
+   - wl/*.wl
+3. The assistant must run tests before proposing changes.
+4. The assistant must apply fixes directly and commit with a clear message.
+5. Manual line-by-line edit instructions are not acceptable unless tool access is unavailable.
+
+If the session does not have repo edit capability, restart in workspace mode.
+
+What needs to be done: There are currently some issues with the use of "N", where mathematica has that as a reserved letter. ChatGPT suggested edits where N was replaced by Nmax, this may or may not have been done correctly, but output is creating issues like 32[32... where "32" should be the mathematica command N.
