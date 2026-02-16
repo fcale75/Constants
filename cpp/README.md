@@ -1,15 +1,16 @@
-# FLINT Backend (Initial)
+# FLINT Backend
 
-This directory contains the initial C++/FLINT backend for the Constants project.
+This directory contains the C++/FLINT backend for the Constants project.
 
 Current executable:
 - `constants_objective`
 
-What it does:
+What it does today:
 - Parses a coefficient vector `a_0,...,a_{P-1}`.
 - Computes
   - finite objective `1/2 + sum_{k=1..Nmax} Sk(k)^4`
-  - optional mod-4 asymptotic tail objective (Kummer-style split).
+  - optional mod-4 asymptotic tail objective (Kummer-style split)
+  - optional gradient and Hessian (finite + tail).
 - Reports objective and `sqrt(objective)` as a `nu2` candidate.
 
 Build:
@@ -25,10 +26,15 @@ Run:
   --k 32 \
   --prec-dps 120 \
   --print-dps 60 \
-  --tail true
+  --tail true \
+  --derivatives true \
+  --hessian true
 ```
 
 Notes:
 - FLINT (with Arb) is required (`brew install flint`).
-- This is the first migration step (objective evaluation only).
-- Newton/gradient/Hessian will be migrated next with persistent precompute tables.
+- Tail derivatives reuse precomputed basis/zeta tables inside a run.
+- Regressions:
+  - objective parity: `/Users/fcale/Dropbox/ChatGPT/Constants/tools/test_flint_objective.sh`
+  - derivative parity: `/Users/fcale/Dropbox/ChatGPT/Constants/tools/test_flint_derivatives.sh`
+- Next major step is Newton/continuation and persistent on-disk precompute tables.

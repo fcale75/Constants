@@ -18,18 +18,23 @@ A first C++/FLINT executable:
 It computes:
 - finite objective: `1/2 + sum_{k=1..Nmax} Sk(k)^4`
 - mod-4 asymptotic tail objective
+- finite + tail gradient
+- finite + tail Hessian
 - total objective and `sqrt(objective)`
 
 Utility scripts:
 - `tools/build_flint_cpp.sh`
 - `tools/run_flint_objective.sh`
 - `tools/test_flint_objective.sh`
+- `tools/test_flint_derivatives.sh`
 
 Current parity status:
 - Matches known objective values for:
   - `P=1, a={1}`
   - `P=2, a={0.986,0.014}`
   to the printed precision.
+- Matches WL objective/gradient/Hessian at a fixed `P=4` coefficient vector
+  with max absolute errors around `1e-70` (objective/gradient) and `1e-69` (Hessian).
 
 ## Next implementation steps
 
@@ -38,10 +43,10 @@ Current parity status:
    - asymptotic basis tensors by residue class mod 4
    - Hurwitz-zeta weights for `(s, n0 + r/4)`
 
-2. Implement FLINT gradient and Hessian kernels:
-   - `grad_l = 4 sum J_l * Sk^3` (finite + tail)
-   - `hess_il = 12 sum J_i J_l * Sk^2` (finite + tail)
-   - avoid recomputing shared basis terms in inner loops
+2. Optimize derivative kernels for large `P`:
+   - reduce temporary convolutions in tail Hessian
+   - thread parallelism over `(i,l)` blocks
+   - benchmark memory/compute tradeoffs for pairwise basis products
 
 3. Add constrained Newton driver in C++:
    - variable elimination or projected coordinates for `sum a_j = 1`
