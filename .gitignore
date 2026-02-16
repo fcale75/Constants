@@ -4,3 +4,6 @@
 # Logs from test runs
 logs/
 logs/*.txt
+
+# C++ build artifacts
+cpp/build/
