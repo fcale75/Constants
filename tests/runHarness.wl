@@ -19,7 +19,7 @@ If[!DirectoryQ[logsDir], CreateDirectory[logsDir]];
 timestamp = DateString[{"Year", "Month", "Day", "Hour", "Minute", "Second"}];
 logPath = FileNameJoin[{logsDir, "runHarness_" <> timestamp <> ".txt"}];
 sumPath = FileNameJoin[{logsDir, "latest_summary.txt"}];
-
+Export[sumPath, "STARTING RUN\n", "Text"];
 log = OpenWrite[logPath];
 logPrint[args__] := (WriteString[log, ToString[Row[{args}], OutputForm] <> "\n"]; Flush[log];);
 stdoutLine[msg_] := (WriteString[$Output, msg <> "\n"]; Flush[$Output];);
@@ -38,6 +38,7 @@ Block[{Print = logPrint},
 ];
 
 stdoutLine["[3/4] driverTests.wl"];
+Export[sumPath, "REACHED STAGE 3/4 (driverTests)\n", "Text"];
 Block[{Print = logPrint},
   AppendTo[reports, Quiet @ Check[Get[FileNameJoin[{repoRoot, "tests", "driverTests.wl"}]], $Failed]];
 ];
@@ -70,15 +71,15 @@ ConstantsClearCaches[];
 ConstantsSetPrecision[60];
 
 P = 8;
-N = 32;
+NMax = 32;
 K = 8;
 
 a0 = Normalize[Table[(-1)^n/(8^n*(n + 1)), {n, 0, P - 1}], Total];
 a0 = a0 - (Total[a0] - 1)/P * ConstantArray[1, P];
 
-obj = Quiet @ Check[Objective[a0, N, K], $Failed];
-gFin = Quiet @ Check[Constants`Newton`NewtonDerivatives[a0, P, N, 0]["gpart"], $Failed];
-gTail = Quiet @ Check[Constants`TailDerivatives`TailGradient[a0, N, K], $Failed];
+obj = Quiet @ Check[Objective[a0, NMax, K], $Failed];
+gFin = Quiet @ Check[Constants`Newton`NewtonDerivatives[a0, P, NMax, 0]["gpart"], $Failed];
+gTail = Quiet @ Check[Constants`TailDerivatives`TailGradient[a0, NMax, K], $Failed];
 
 (* If anything is $Failed, treat as a harness failure. *)
 smokeOK = And[obj =!= $Failed, gFin =!= $Failed, gTail =!= $Failed];
