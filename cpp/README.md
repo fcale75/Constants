@@ -67,6 +67,7 @@ python3 /Users/fcale/Dropbox/ChatGPT/Constants/tools/run_flint_calibrate_stage.p
   --n-list 256,384,512 \
   --k-list 32,48,64 \
   --prec-list 140,170,200 \
+  --stability-mode by-n \
   --stability-threshold 1e-12 \
   --require-consecutive 2 \
   --out /Users/fcale/Dropbox/ChatGPT/Constants/checkpoints/flint_stage_calibration.json
@@ -82,4 +83,6 @@ Notes:
 - runner reliability:
   - retry escalation: `/Users/fcale/Dropbox/ChatGPT/Constants/tools/test_flint_bootstrap_retry.sh`
   - stage calibration: `/Users/fcale/Dropbox/ChatGPT/Constants/tools/test_flint_calibrate_stage.sh`
+- calibration defaults:
+  - stability is measured across increasing `N` for fixed `(K, prec)` (`--stability-mode by-n`)
 - Next major step is persistent on-disk precompute tables and parallelized Hessian kernels for large `P`.

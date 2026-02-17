@@ -62,6 +62,7 @@ Current parity status:
    - smarter precision scheduling across iterations/stages
    - failure recovery (retry with higher precision / smaller step floor)
    - objective stability checks across `(N,K,prec)` sweeps
+     - default calibration mode is `by-n`: compare drift across increasing `N` for fixed `(K,prec)`
 
 4. Add benchmarking harness:
    - per-stage timing for finite/tail grad/hess

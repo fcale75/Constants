@@ -31,6 +31,10 @@ rows = data.get("rows", [])
 if len(rows) < 2:
     raise SystemExit("Expected at least 2 calibration rows")
 
+cfg = data.get("config", {})
+if cfg.get("stabilityMode") != "by-n":
+    raise SystemExit("Expected default stability mode by-n")
+
 for row in rows:
     if row.get("P") != 8:
         raise SystemExit("Unexpected P in calibration rows")
@@ -38,6 +42,10 @@ for row in rows:
         raise SystemExit("Non-converged row in calibration test")
     if not row.get("kktSolveOk", False):
         raise SystemExit("kktSolveOk false in calibration test")
+    if row.get("stabilityMode") != "by-n":
+        raise SystemExit("Row missing stability mode")
+    if "byN(" not in row.get("driftScope", ""):
+        raise SystemExit("Row missing by-n drift scope")
 
 if data.get("recommended") is None:
     raise SystemExit("Expected a recommended setting")

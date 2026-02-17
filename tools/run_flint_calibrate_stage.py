@@ -42,6 +42,15 @@ def parse_args() -> argparse.Namespace:
         default=2,
         help="Consecutive stable drifts required to mark recommended setting.",
     )
+    p.add_argument(
+        "--stability-mode",
+        choices=["by-n", "sequential"],
+        default="by-n",
+        help=(
+            "by-n: compare objective drift only across increasing N for fixed (K,prec). "
+            "sequential: compare against immediately previous grid point."
+        ),
+    )
     p.add_argument("--bootstrap-records", default=str(DEFAULT_BOOTSTRAP_RECORDS))
     p.add_argument("--start-coeffs", default="", help="Optional CSV to override initial coefficients.")
     p.add_argument("--out", default=str(DEFAULT_OUT))
@@ -170,9 +179,23 @@ def run_stage(
     return out
 
 
-def combos(n_list: list[int], k_list: list[int], prec_list: list[int]) -> list[tuple[int, int, int]]:
-    grid = [(n, k, p) for p in sorted(prec_list) for n in sorted(n_list) for k in sorted(k_list)]
-    # monotone by increasing computational cost.
+def combos(
+    n_list: list[int],
+    k_list: list[int],
+    prec_list: list[int],
+    stability_mode: str,
+) -> list[tuple[int, int, int]]:
+    if stability_mode == "by-n":
+        # Keep (K, prec) fixed while N increases so stability checks are meaningful.
+        return [
+            (n, k, prec)
+            for prec in sorted(prec_list)
+            for k in sorted(k_list)
+            for n in sorted(n_list)
+        ]
+
+    grid = [(n, k, prec) for prec in sorted(prec_list) for n in sorted(n_list) for k in sorted(k_list)]
+    # Monotone by increasing computational cost.
     grid.sort(key=lambda t: (t[2], t[0], t[1], t[0] * t[1]))
     return grid
 
@@ -211,20 +234,40 @@ def main() -> int:
     )
 
     rows = []
-    last_obj: Decimal | None = None
-    stable_streak = 0
+    seq_last_obj: Decimal | None = None
+    seq_stable_streak = 0
+    by_n_last_obj: dict[tuple[int, int], Decimal] = {}
+    by_n_stable_streak: dict[tuple[int, int], int] = {}
     recommended_idx: int | None = None
 
-    for idx, (n, k, prec) in enumerate(combos(n_list, k_list, prec_list)):
+    for idx, (n, k, prec) in enumerate(combos(n_list, k_list, prec_list, args.stability_mode)):
         out = run_stage(current, args.p, n, k, prec, args)
         converged = out.get("converged", "false") == "true"
         kkt_ok = out.get("kktSolveOk", "true") == "true"
         obj = Decimal(out.get("objective", "nan"))
-        drift = None if last_obj is None else abs(obj - last_obj)
-        if drift is not None and drift <= stability_threshold and converged and kkt_ok:
-            stable_streak += 1
+
+        if args.stability_mode == "by-n":
+            key = (k, prec)
+            prev_obj = by_n_last_obj.get(key)
+            drift = None if prev_obj is None else abs(obj - prev_obj)
+            stable_streak = by_n_stable_streak.get(key, 0)
+            if drift is not None and drift <= stability_threshold and converged and kkt_ok:
+                stable_streak += 1
+            else:
+                stable_streak = 0
+            by_n_stable_streak[key] = stable_streak
+            by_n_last_obj[key] = obj
+            drift_scope = f"byN(K={k},prec={prec})"
         else:
-            stable_streak = 0
+            drift = None if seq_last_obj is None else abs(obj - seq_last_obj)
+            if drift is not None and drift <= stability_threshold and converged and kkt_ok:
+                seq_stable_streak += 1
+            else:
+                seq_stable_streak = 0
+            stable_streak = seq_stable_streak
+            seq_last_obj = obj
+            drift_scope = "sequential"
+
         if recommended_idx is None and stable_streak >= require_consecutive:
             recommended_idx = idx
 
@@ -242,6 +285,8 @@ def main() -> int:
             "resInfUpper": out.get("resInfUpper", ""),
             "constraintAbsUpper": out.get("constraintAbsUpper", ""),
             "timeSec": out.get("timeSec", ""),
+            "stabilityMode": args.stability_mode,
+            "driftScope": drift_scope,
             "driftFromPrev": str(drift) if drift is not None else "",
             "stableStreak": stable_streak,
         }
@@ -250,14 +295,13 @@ def main() -> int:
         print(
             f"[{idx:02d}] P={args.p} N={n} K={k} prec={prec} "
             f"conv={converged} kkt={kkt_ok} obj={row['objective']} "
-            f"drift={row['driftFromPrev'] or 'NA'} time={row['timeSec']}"
+            f"drift={row['driftFromPrev'] or 'NA'} ({row['driftScope']}) "
+            f"time={row['timeSec']}"
         )
 
         a_csv = out.get("aCsv", "")
         if a_csv:
             current = parse_csv_decimals(a_csv)
-
-        last_obj = obj
 
     result = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -268,6 +312,7 @@ def main() -> int:
             "precList": sorted(prec_list),
             "stabilityThreshold": str(stability_threshold),
             "requireConsecutive": require_consecutive,
+            "stabilityMode": args.stability_mode,
             "initSource": init_source,
         },
         "rows": rows,
