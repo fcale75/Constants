@@ -33,6 +33,8 @@ Utility scripts:
 - `tools/test_flint_optimize_smoke.sh`
 - `tools/run_flint_bootstrap.py`
 - `tools/test_flint_bootstrap_retry.sh`
+- `tools/run_flint_calibrate_stage.py`
+- `tools/test_flint_calibrate_stage.sh`
 
 Current parity status:
 - Matches known objective values for:
@@ -59,6 +61,7 @@ Current parity status:
    - improve conditioning strategy (projected coordinates or regularized KKT)
    - smarter precision scheduling across iterations/stages
    - failure recovery (retry with higher precision / smaller step floor)
+   - objective stability checks across `(N,K,prec)` sweeps
 
 4. Add benchmarking harness:
    - per-stage timing for finite/tail grad/hess

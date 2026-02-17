@@ -60,6 +60,18 @@ python3 /Users/fcale/Dropbox/ChatGPT/Constants/tools/run_flint_bootstrap.py \
   --records /Users/fcale/Dropbox/ChatGPT/Constants/checkpoints/flint_bootstrap_records.json
 ```
 
+Calibrate stage settings for larger P:
+```bash
+python3 /Users/fcale/Dropbox/ChatGPT/Constants/tools/run_flint_calibrate_stage.py \
+  --p 32 \
+  --n-list 256,384,512 \
+  --k-list 32,48,64 \
+  --prec-list 140,170,200 \
+  --stability-threshold 1e-12 \
+  --require-consecutive 2 \
+  --out /Users/fcale/Dropbox/ChatGPT/Constants/checkpoints/flint_stage_calibration.json
+```
+
 Notes:
 - FLINT (with Arb) is required (`brew install flint`).
 - Tail derivatives reuse precomputed basis/zeta tables inside a run.
@@ -69,4 +81,5 @@ Notes:
   - optimize smoke: `/Users/fcale/Dropbox/ChatGPT/Constants/tools/test_flint_optimize_smoke.sh`
 - runner reliability:
   - retry escalation: `/Users/fcale/Dropbox/ChatGPT/Constants/tools/test_flint_bootstrap_retry.sh`
+  - stage calibration: `/Users/fcale/Dropbox/ChatGPT/Constants/tools/test_flint_calibrate_stage.sh`
 - Next major step is persistent on-disk precompute tables and parallelized Hessian kernels for large `P`.
