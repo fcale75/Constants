@@ -29,23 +29,24 @@ getcontext().prec = 120
 text = open(sys.argv[1], "r", encoding="utf-8").read()
 
 line_re = re.compile(
-    r"P=(\d+)\s+N=\d+\s+K=\d+\s+prec=\d+\s+init=\S+\s+converged=(\w+)\s+iters=\S+\s+objective=([0-9.]+)"
+    r"P=(\d+)\s+N=\d+\s+K=\d+\s+prec=\d+\s+init=\S+\s+converged=(\w+)\s+kktSolveOk=(\w+)\s+iters=\S+\s+objective=([0-9.]+)"
 )
 rows = []
 for m in line_re.finditer(text):
     p = int(m.group(1))
     conv = m.group(2) == "true"
-    obj = Decimal(m.group(3))
-    rows.append((p, conv, obj))
+    kkt_ok = m.group(3) == "true"
+    obj = Decimal(m.group(4))
+    rows.append((p, conv, kkt_ok, obj))
 
-if [p for p, _, _ in rows] != [1, 2, 4, 8]:
+if [p for p, _, _, _ in rows] != [1, 2, 4, 8]:
     raise SystemExit(f"Unexpected stage rows: {rows}")
 
-for p, conv, _ in rows:
-    if not conv:
-        raise SystemExit(f"Stage P={p} did not converge")
+for p, conv, kkt_ok, _ in rows:
+    if not (conv and kkt_ok):
+        raise SystemExit(f"Stage P={p} did not converge cleanly")
 
-obj = {p: v for p, _, v in rows}
+obj = {p: v for p, _, _, v in rows}
 if not (obj[1] > obj[2] > obj[4] >= obj[8]):
     raise SystemExit(f"Objective monotonicity failed: {obj}")
 

@@ -54,6 +54,9 @@ Run staged continuation:
 ```bash
 python3 /Users/fcale/Dropbox/ChatGPT/Constants/tools/run_flint_bootstrap.py \
   --stage-list "1:256:32:120:20:1e-24:1e-24,2:256:32:120:20:1e-24:1e-24,4:256:32:120:20:1e-24:1e-24,8:256:32:120:20:1e-24:1e-24" \
+  --max-retries 2 \
+  --retry-prec-step 20 \
+  --retry-max-it-step 8 \
   --records /Users/fcale/Dropbox/ChatGPT/Constants/checkpoints/flint_bootstrap_records.json
 ```
 
@@ -64,4 +67,6 @@ Notes:
   - objective parity: `/Users/fcale/Dropbox/ChatGPT/Constants/tools/test_flint_objective.sh`
   - derivative parity: `/Users/fcale/Dropbox/ChatGPT/Constants/tools/test_flint_derivatives.sh`
   - optimize smoke: `/Users/fcale/Dropbox/ChatGPT/Constants/tools/test_flint_optimize_smoke.sh`
+- runner reliability:
+  - retry escalation: `/Users/fcale/Dropbox/ChatGPT/Constants/tools/test_flint_bootstrap_retry.sh`
 - Next major step is persistent on-disk precompute tables and parallelized Hessian kernels for large `P`.

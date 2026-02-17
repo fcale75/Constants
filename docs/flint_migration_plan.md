@@ -23,6 +23,7 @@ It computes:
 - total objective and `sqrt(objective)`
 - constrained Newton optimization with damping
 - staged continuation via `tools/run_flint_bootstrap.py`
+  - includes retry-based escalation (precision/iterations/damping floor)
 
 Utility scripts:
 - `tools/build_flint_cpp.sh`
@@ -31,6 +32,7 @@ Utility scripts:
 - `tools/test_flint_derivatives.sh`
 - `tools/test_flint_optimize_smoke.sh`
 - `tools/run_flint_bootstrap.py`
+- `tools/test_flint_bootstrap_retry.sh`
 
 Current parity status:
 - Matches known objective values for:

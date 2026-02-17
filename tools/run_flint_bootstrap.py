@@ -40,6 +40,15 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--no-save", action="store_true")
     p.add_argument("--resume-from-records", choices=["true", "false"], default="true")
     p.add_argument("--start-coeffs", default="", help="Optional CSV coefficients for the first stage.")
+    p.add_argument("--max-retries", type=int, default=2, help="Retry attempts per stage on failure.")
+    p.add_argument("--retry-prec-step", type=int, default=20, help="Extra precision digits per retry.")
+    p.add_argument("--retry-max-it-step", type=int, default=8, help="Extra max iterations per retry.")
+    p.add_argument(
+        "--retry-step-min-exp-step",
+        type=int,
+        default=2,
+        help="Extra damping floor exponent per retry.",
+    )
     return p.parse_args()
 
 
@@ -109,6 +118,7 @@ def parse_stage_list(spec: str, args: argparse.Namespace) -> list[dict]:
                 "maxIt": args.max_it,
                 "tol": str(args.tol),
                 "constraintTol": str(args.constraint_tol),
+                "stepMinExp": args.step_min_exp,
             }
             for p in p_list
         ]
@@ -129,6 +139,7 @@ def parse_stage_list(spec: str, args: argparse.Namespace) -> list[dict]:
             "maxIt": args.max_it,
             "tol": str(args.tol),
             "constraintTol": str(args.constraint_tol),
+            "stepMinExp": args.step_min_exp,
         }
         if len(parts) >= 2 and parts[1]:
             stage["Nmax"] = int(parts[1])
@@ -164,7 +175,7 @@ def run_stage(coeffs: list[Decimal], stage: dict, args: argparse.Namespace) -> d
         "--tol", str(stage["tol"]),
         "--constraint-tol", str(stage["constraintTol"]),
         "--damping", args.damping,
-        "--step-min-exp", str(args.step_min_exp),
+        "--step-min-exp", str(stage["stepMinExp"]),
         "--log", args.log,
     ]
     proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
@@ -175,6 +186,86 @@ def run_stage(coeffs: list[Decimal], stage: dict, args: argparse.Namespace) -> d
     out = parse_kv_output(proc.stdout)
     out["_stdout"] = proc.stdout
     return out
+
+
+def run_stage_with_retries(
+    coeffs: list[Decimal], stage: dict, args: argparse.Namespace
+) -> tuple[dict[str, str], dict, list[str]]:
+    stage_run = dict(stage)
+    attempt_logs: list[dict] = []
+    messages: list[str] = []
+    last_out: dict[str, str] | None = None
+
+    for attempt in range(args.max_retries + 1):
+        try:
+            out = run_stage(coeffs, stage_run, args)
+            converged = out.get("converged", "false") == "true"
+            kkt_ok = out.get("kktSolveOk", "true") == "true"
+            last_out = out
+
+            attempt_logs.append(
+                {
+                    "attempt": attempt,
+                    "params": dict(stage_run),
+                    "status": "ok",
+                    "converged": converged,
+                    "kktSolveOk": kkt_ok,
+                    "iterations": out.get("iterations", ""),
+                    "objective": out.get("objective", ""),
+                    "resInfUpper": out.get("resInfUpper", ""),
+                    "constraintAbsUpper": out.get("constraintAbsUpper", ""),
+                    "timeSec": out.get("timeSec", ""),
+                }
+            )
+
+            if converged and kkt_ok:
+                out["_attemptLogs"] = json.dumps(attempt_logs)
+                return out, stage_run, messages
+
+            if attempt < args.max_retries:
+                msg = (
+                    f"retry {attempt + 1}/{args.max_retries}: "
+                    f"P={stage_run['P']} did not fully converge "
+                    f"(converged={converged}, kktSolveOk={kkt_ok}); "
+                    "escalating precision/iterations."
+                )
+                messages.append(msg)
+                stage_run["precDps"] = int(stage_run["precDps"]) + int(args.retry_prec_step)
+                stage_run["maxIt"] = int(stage_run["maxIt"]) + int(args.retry_max_it_step)
+                stage_run["stepMinExp"] = min(
+                    60, int(stage_run["stepMinExp"]) + int(args.retry_step_min_exp_step)
+                )
+            continue
+        except Exception as exc:
+            attempt_logs.append(
+                {
+                    "attempt": attempt,
+                    "params": dict(stage_run),
+                    "status": "error",
+                    "error": str(exc),
+                }
+            )
+            if attempt < args.max_retries:
+                msg = (
+                    f"retry {attempt + 1}/{args.max_retries}: "
+                    f"P={stage_run['P']} stage error ({exc}); escalating and retrying."
+                )
+                messages.append(msg)
+                stage_run["precDps"] = int(stage_run["precDps"]) + int(args.retry_prec_step)
+                stage_run["maxIt"] = int(stage_run["maxIt"]) + int(args.retry_max_it_step)
+                stage_run["stepMinExp"] = min(
+                    60, int(stage_run["stepMinExp"]) + int(args.retry_step_min_exp_step)
+                )
+                continue
+            raise RuntimeError(
+                f"FLINT stage failed after retries for P={stage_run['P']}: {exc}"
+            ) from exc
+
+    if last_out is None:
+        raise RuntimeError(f"FLINT stage produced no output for P={stage['P']}")
+
+    last_out["_attemptLogs"] = json.dumps(attempt_logs)
+    return last_out, stage_run, messages
 
 
 def load_records(path: Path) -> list[dict]:
@@ -210,7 +301,9 @@ def find_latest_record(records: list[dict], stage: dict) -> dict | None:
 def main() -> int:
     args = parse_args()
     stages = parse_stage_list(args.stage_list, args)
-    max_prec = max(int(s["precDps"]) for s in stages)
+    max_prec = max(int(s["precDps"]) for s in stages) + int(args.max_retries) * int(
+        args.retry_prec_step
+    )
     getcontext().prec = max(max_prec + 20, 180)
 
     records_path = Path(args.records)
@@ -241,17 +334,21 @@ def main() -> int:
             init = warm_start(prev_coeffs, p)
             init_source = "previous-stage"
 
-        out = run_stage(init, stage, args)
+        out, stage_used, retry_messages = run_stage_with_retries(init, stage, args)
+        for msg in retry_messages:
+            print(msg)
+
         converged = out.get("converged", "false")
         iters = out.get("iterations", "?")
         obj = out.get("objective", "")
         res = out.get("resInfUpper", "")
         cabs = out.get("constraintAbsUpper", "")
         tsec = out.get("timeSec", "")
+        kkt_ok = out.get("kktSolveOk", "true")
 
         print(
-            f"P={p} N={stage['Nmax']} K={stage['K']} prec={stage['precDps']} "
-            f"init={init_source} converged={converged} iters={iters} "
+            f"P={p} N={stage_used['Nmax']} K={stage_used['K']} prec={stage_used['precDps']} "
+            f"init={init_source} converged={converged} kktSolveOk={kkt_ok} iters={iters} "
             f"objective={obj} resInf={res} constraintAbs={cabs} timeSec={tsec}"
         )
 
@@ -265,17 +362,18 @@ def main() -> int:
             "P": p,
             "initSource": init_source,
             "params": {
-                "Nmax": stage["Nmax"],
-                "K": stage["K"],
-                "precDps": stage["precDps"],
-                "maxIt": stage["maxIt"],
-                "tol": str(stage["tol"]),
-                "constraintTol": str(stage["constraintTol"]),
+                "Nmax": stage_used["Nmax"],
+                "K": stage_used["K"],
+                "precDps": stage_used["precDps"],
+                "maxIt": stage_used["maxIt"],
+                "tol": str(stage_used["tol"]),
+                "constraintTol": str(stage_used["constraintTol"]),
                 "damping": args.damping,
-                "stepMinExp": args.step_min_exp,
+                "stepMinExp": stage_used["stepMinExp"],
             },
             "result": {
                 "converged": converged == "true",
+                "kktSolveOk": kkt_ok == "true",
                 "iterations": int(iters) if iters.isdigit() else iters,
                 "objective": obj,
                 "nu2Candidate": out.get("nu2Candidate", ""),
@@ -284,6 +382,10 @@ def main() -> int:
                 "constraintAbsUpper": cabs,
                 "timeSec": tsec,
                 "aCsv": a_csv,
+                "retryMessages": retry_messages,
+                "attemptLogs": json.loads(out.get("_attemptLogs", "[]"))
+                if out.get("_attemptLogs")
+                else [],
             },
         }
         records.append(rec)
