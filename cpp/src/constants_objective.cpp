@@ -10,6 +10,7 @@
 #include <cctype>
 #include <exception>
 #include <iostream>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -72,14 +73,21 @@ struct Options {
   bool derivatives = false;
   bool computeHessian = true;
   bool optimize = false;
+  slong minIterations = 1;
   slong maxIterations = 30;
   double tolerance = 1e-24;
   double constraintTolerance = 1e-24;
   bool damping = true;
   slong stepMinExp = 20;  // minimum step = 2^-stepMinExp
+  double maxAbsA = 0.0;   // <=0 disables absolute coefficient guard
+  double stepMaxU = 0.0;  // <=0 disables scaled-step guard
+  slong nonnegativeGrid = 0;  // <=0 disables profile non-negativity guard
+  double nonnegativeTol = 0.0;
+  double kktReg = 0.0;        // additive diagonal regularization in scaled KKT solve
   bool log = true;
   bool hasInitialLambda = false;
   std::string initialLambda;
+  std::string kktScaling = "asymptotic";
 };
 
 struct FiniteEval {
@@ -116,8 +124,12 @@ struct EvalState {
       << "  " << argv0
       << " --coeffs a0,a1,... [--nmax 256] [--k 32] [--prec-dps 120] [--print-dps 60]"
       << " [--tail true|false] [--derivatives true|false] [--hessian true|false]"
-      << " [--optimize true|false] [--max-it 30] [--tol 1e-24] [--constraint-tol 1e-24]"
-      << " [--damping true|false] [--step-min-exp 20] [--log true|false]"
+      << " [--optimize true|false] [--min-it 1] [--max-it 30] [--tol 1e-24] [--constraint-tol 1e-24]"
+      << " [--damping true|false] [--step-min-exp 20] [--max-abs-a 0] [--step-max-u 0]"
+      << " [--nonnegative-grid 0] [--nonnegative-tol 0]"
+      << " [--kkt-reg 0]"
+      << " [--log true|false]"
+      << " [--kkt-scaling asymptotic|none]"
       << " [--initial-lambda value]\n";
   std::exit(1);
 }
@@ -205,6 +217,11 @@ Options ParseArgs(int argc, char** argv) {
       opt.maxIterations = std::stol(argv[++i]);
       continue;
     }
+    if (arg == "--min-it") {
+      if (i + 1 >= argc) UsageAndExit(argv[0]);
+      opt.minIterations = std::stol(argv[++i]);
+      continue;
+    }
     if (arg == "--tol") {
       if (i + 1 >= argc) UsageAndExit(argv[0]);
       opt.tolerance = std::stod(argv[++i]);
@@ -225,6 +242,31 @@ Options ParseArgs(int argc, char** argv) {
       opt.stepMinExp = std::stol(argv[++i]);
       continue;
     }
+    if (arg == "--max-abs-a") {
+      if (i + 1 >= argc) UsageAndExit(argv[0]);
+      opt.maxAbsA = std::stod(argv[++i]);
+      continue;
+    }
+    if (arg == "--step-max-u") {
+      if (i + 1 >= argc) UsageAndExit(argv[0]);
+      opt.stepMaxU = std::stod(argv[++i]);
+      continue;
+    }
+    if (arg == "--nonnegative-grid") {
+      if (i + 1 >= argc) UsageAndExit(argv[0]);
+      opt.nonnegativeGrid = std::stol(argv[++i]);
+      continue;
+    }
+    if (arg == "--nonnegative-tol") {
+      if (i + 1 >= argc) UsageAndExit(argv[0]);
+      opt.nonnegativeTol = std::stod(argv[++i]);
+      continue;
+    }
+    if (arg == "--kkt-reg") {
+      if (i + 1 >= argc) UsageAndExit(argv[0]);
+      opt.kktReg = std::stod(argv[++i]);
+      continue;
+    }
     if (arg == "--log") {
       if (i + 1 >= argc) UsageAndExit(argv[0]);
       opt.log = ParseBool(argv[++i]);
@@ -234,6 +276,11 @@ Options ParseArgs(int argc, char** argv) {
       if (i + 1 >= argc) UsageAndExit(argv[0]);
       opt.hasInitialLambda = true;
       opt.initialLambda = argv[++i];
+      continue;
+    }
+    if (arg == "--kkt-scaling") {
+      if (i + 1 >= argc) UsageAndExit(argv[0]);
+      opt.kktScaling = argv[++i];
       continue;
     }
     if (arg == "--help" || arg == "-h") {
@@ -259,11 +306,35 @@ Options ParseArgs(int argc, char** argv) {
   if (opt.maxIterations <= 0) {
     throw std::runtime_error("--max-it must be positive");
   }
+  if (opt.minIterations <= 0) {
+    throw std::runtime_error("--min-it must be positive");
+  }
+  if (opt.minIterations > opt.maxIterations) {
+    throw std::runtime_error("--min-it must be <= --max-it");
+  }
   if (opt.tolerance <= 0 || opt.constraintTolerance <= 0) {
     throw std::runtime_error("Tolerances must be positive");
   }
   if (opt.stepMinExp < 0 || opt.stepMinExp > 60) {
     throw std::runtime_error("--step-min-exp must be between 0 and 60");
+  }
+  if (opt.maxAbsA < 0) {
+    throw std::runtime_error("--max-abs-a must be >= 0");
+  }
+  if (opt.stepMaxU < 0) {
+    throw std::runtime_error("--step-max-u must be >= 0");
+  }
+  if (opt.nonnegativeGrid < 0) {
+    throw std::runtime_error("--nonnegative-grid must be >= 0");
+  }
+  if (opt.nonnegativeTol < 0) {
+    throw std::runtime_error("--nonnegative-tol must be >= 0");
+  }
+  if (opt.kktReg < 0) {
+    throw std::runtime_error("--kkt-reg must be >= 0");
+  }
+  if (!(opt.kktScaling == "asymptotic" || opt.kktScaling == "none")) {
+    throw std::runtime_error("--kkt-scaling must be one of: asymptotic, none");
   }
 
   return opt;
@@ -700,6 +771,42 @@ double AbsUpperBound(const ArbNum& x) {
   return out;
 }
 
+double MaxAbsUpperBound(const ArbVec& a) {
+  double mx = 0.0;
+  for (const auto& v : a) {
+    const double cur = AbsUpperBound(v);
+    if (cur > mx) mx = cur;
+  }
+  return mx;
+}
+
+double StepScaledInfUpperBound(
+    const ArbVec& aCur,
+    const ArbVec& aTry,
+    const ArbVec& kktWeights,
+    slong precBits) {
+  ArbNum diff, scaled;
+  mag_t cur, mx;
+  mag_init(cur);
+  mag_init(mx);
+  mag_zero(mx);
+
+  for (std::size_t i = 0; i < aCur.size(); ++i) {
+    arb_sub(diff.raw(), aTry[i].raw(), aCur[i].raw(), precBits);
+    arb_div(scaled.raw(), diff.raw(), kktWeights[i].raw(), precBits);
+    arb_abs(scaled.raw(), scaled.raw());
+    arb_get_mag(cur, scaled.raw());
+    if (mag_cmp(cur, mx) > 0) {
+      mag_set(mx, cur);
+    }
+  }
+
+  const double out = mag_get_d(mx);
+  mag_clear(cur);
+  mag_clear(mx);
+  return out;
+}
+
 double ResidualInfUpperBound(const ArbVec& grad, const ArbNum& lambda, slong precBits) {
   ArbNum tmp;
   mag_t cur, mx;
@@ -720,6 +827,77 @@ double ResidualInfUpperBound(const ArbVec& grad, const ArbNum& lambda, slong pre
   mag_clear(cur);
   mag_clear(mx);
   return out;
+}
+
+ArbVec BuildKktWeights(std::size_t pCount, const std::string& mode, slong precBits) {
+  ArbVec w(pCount);
+  if (mode == "none") {
+    for (std::size_t i = 0; i < pCount; ++i) {
+      arb_set_ui(w[i].raw(), 1);
+    }
+    return w;
+  }
+
+  // Asymptotic scaling:
+  // a_i ~ C * (-1)^i / (8^i * (i+1))
+  // Use weighted coordinates b_i = a_i / w_i with w_i = 1/((i+1) * 8^i).
+  arb_set_ui(w[0].raw(), 1);
+  ArbNum tmp;
+  for (std::size_t i = 1; i < pCount; ++i) {
+    // w_i = w_{i-1} * i / (8*(i+1))
+    arb_mul_ui(tmp.raw(), w[i - 1].raw(), static_cast<ulong>(i), precBits);
+    arb_div_ui(w[i].raw(), tmp.raw(), static_cast<ulong>(8 * (i + 1)), precBits);
+  }
+  return w;
+}
+
+ArbVec BuildHalfBinomialCoefficients(std::size_t pCount, slong precBits) {
+  ArbVec c(pCount);
+  if (pCount == 0) return c;
+
+  ArbNum pi, tmp;
+  arb_const_pi(pi.raw(), precBits);
+  arb_set_ui(c[0].raw(), 2);
+  arb_div(c[0].raw(), c[0].raw(), pi.raw(), precBits);  // binom(0,1/2) = 2/pi
+
+  for (std::size_t j = 1; j < pCount; ++j) {
+    // binom(j,1/2) = binom(j-1,1/2) * (2j)/(2j-1)
+    arb_mul_ui(tmp.raw(), c[j - 1].raw(), static_cast<ulong>(2 * j), precBits);
+    arb_div_ui(c[j].raw(), tmp.raw(), static_cast<ulong>(2 * j - 1), precBits);
+  }
+  return c;
+}
+
+double MinAnsatzProfileOnUnitGrid(
+    const ArbVec& a,
+    const ArbVec& halfBinom,
+    slong gridPoints,
+    slong precBits) {
+  if (gridPoints <= 0) {
+    return 0.0;
+  }
+
+  ArbNum y, acc, term;
+  double minVal = std::numeric_limits<double>::infinity();
+
+  for (slong t = 0; t <= gridPoints; ++t) {
+    arb_set_si(y.raw(), t);
+    arb_div_si(y.raw(), y.raw(), gridPoints, precBits);  // y in [0,1]
+
+    arb_zero(acc.raw());
+    for (slong j = static_cast<slong>(a.size()) - 1; j >= 0; --j) {
+      arb_mul(acc.raw(), acc.raw(), y.raw(), precBits);
+      arb_mul(term.raw(), a[static_cast<std::size_t>(j)].raw(), halfBinom[static_cast<std::size_t>(j)].raw(), precBits);
+      arb_add(acc.raw(), acc.raw(), term.raw(), precBits);
+    }
+
+    const double mid = arf_get_d(arb_midref(acc.raw()), ARF_RND_NEAR);
+    const double rad = mag_get_d(arb_radref(acc.raw()));
+    const double vLower = mid - rad;
+    if (vLower < minVal) minVal = vLower;
+  }
+
+  return minVal;
 }
 
 ArbNum MeanVector(const ArbVec& a, slong precBits) {
@@ -784,6 +962,8 @@ bool SolveKktStep(
     const ArbVec& grad,
     const ArbNum& lambda,
     const ArbNum& constraint,
+    const ArbVec& kktWeights,
+    double kktReg,
     ArbVec* deltaA,
     ArbNum* deltaLambda,
     slong precBits) {
@@ -798,23 +978,41 @@ bool SolveKktStep(
   arb_mat_zero(A);
   arb_mat_zero(B);
 
+  ArbNum rhs;
+  ArbNum regTerm;
+  if (kktReg > 0.0) {
+    arb_set_d(regTerm.raw(), kktReg);
+  } else {
+    arb_zero(regTerm.raw());
+  }
+
   for (slong i = 0; i < p; ++i) {
+    const ArbNum& wi = kktWeights[static_cast<std::size_t>(i)];
     for (slong j = 0; j < p; ++j) {
-      arb_set(arb_mat_entry(A, i, j), hessian[static_cast<std::size_t>(i)][static_cast<std::size_t>(j)].raw());
+      const ArbNum& wj = kktWeights[static_cast<std::size_t>(j)];
+      arb_mul(rhs.raw(), hessian[static_cast<std::size_t>(i)][static_cast<std::size_t>(j)].raw(), wi.raw(), precBits);
+      arb_mul(rhs.raw(), rhs.raw(), wj.raw(), precBits);
+      if (kktReg > 0.0 && i == j) {
+        arb_add(rhs.raw(), rhs.raw(), regTerm.raw(), precBits);
+      }
+      arb_set(arb_mat_entry(A, i, j), rhs.raw());
     }
-    arb_set_si(arb_mat_entry(A, i, p), -1);
-    arb_set_si(arb_mat_entry(A, p, i), -1);
+    arb_neg(rhs.raw(), wi.raw());
+    arb_set(arb_mat_entry(A, i, p), rhs.raw());
+    arb_set(arb_mat_entry(A, p, i), rhs.raw());
   }
   arb_zero(arb_mat_entry(A, p, p));
 
-  ArbNum rhs;
+  ArbNum stationarity;
   for (slong i = 0; i < p; ++i) {
-    arb_sub(rhs.raw(), grad[static_cast<std::size_t>(i)].raw(), lambda.raw(), precBits);
-    arb_neg(rhs.raw(), rhs.raw());
-    arb_set(arb_mat_entry(B, i, 0), rhs.raw());
+    const ArbNum& wi = kktWeights[static_cast<std::size_t>(i)];
+    arb_sub(stationarity.raw(), grad[static_cast<std::size_t>(i)].raw(), lambda.raw(), precBits);
+    arb_mul(stationarity.raw(), stationarity.raw(), wi.raw(), precBits);
+    arb_neg(stationarity.raw(), stationarity.raw());
+    arb_set(arb_mat_entry(B, i, 0), stationarity.raw());
   }
-  arb_neg(rhs.raw(), constraint.raw());
-  arb_set(arb_mat_entry(B, p, 0), rhs.raw());
+  arb_neg(stationarity.raw(), constraint.raw());
+  arb_set(arb_mat_entry(B, p, 0), stationarity.raw());
 
   const int ok = arb_mat_solve(X, A, B, precBits);
 
@@ -822,6 +1020,10 @@ bool SolveKktStep(
     deltaA->assign(static_cast<std::size_t>(p), ArbNum());
     for (slong i = 0; i < p; ++i) {
       arb_get_mid_arb((*deltaA)[static_cast<std::size_t>(i)].raw(), arb_mat_entry(X, i, 0));
+      arb_mul((*deltaA)[static_cast<std::size_t>(i)].raw(),
+              (*deltaA)[static_cast<std::size_t>(i)].raw(),
+              kktWeights[static_cast<std::size_t>(i)].raw(),
+              precBits);
     }
     arb_get_mid_arb(deltaLambda->raw(), arb_mat_entry(X, p, 0));
   }
@@ -895,6 +1097,11 @@ int main(int argc, char** argv) {
     if (opt.optimize) {
       ArbVec a = aInitial;
       ProjectToConstraint(&a, precBits);
+      const ArbVec kktWeights = BuildKktWeights(pCount, opt.kktScaling, precBits);
+      ArbVec halfBinom;
+      if (opt.nonnegativeGrid > 0) {
+        halfBinom = BuildHalfBinomialCoefficients(pCount, precBits);
+      }
 
       ArbNum lambda;
       if (opt.hasInitialLambda) {
@@ -930,7 +1137,8 @@ int main(int argc, char** argv) {
               << "\n";
         }
 
-        if (state.resInfUpper <= opt.tolerance &&
+        if (it >= opt.minIterations &&
+            state.resInfUpper <= opt.tolerance &&
             state.constraintAbsUpper <= opt.constraintTolerance) {
           converged = true;
           break;
@@ -938,7 +1146,16 @@ int main(int argc, char** argv) {
 
         ArbVec deltaA;
         ArbNum deltaLambda;
-        if (!SolveKktStep(state.hessian, state.gradient, lambda, state.constraint, &deltaA, &deltaLambda, precBits)) {
+        if (!SolveKktStep(
+                state.hessian,
+                state.gradient,
+                lambda,
+                state.constraint,
+                kktWeights,
+                opt.kktReg,
+                &deltaA,
+                &deltaLambda,
+                precBits)) {
           kktSolveOk = false;
           break;
         }
@@ -952,6 +1169,30 @@ int main(int argc, char** argv) {
         if (opt.damping) {
           while (stepExp <= opt.stepMinExp) {
             ApplyPow2Step(&aTry, &lambdaTry, a, lambda, deltaA, deltaLambda, stepExp, precBits);
+
+            bool guardOk = true;
+            if (opt.maxAbsA > 0.0) {
+              if (MaxAbsUpperBound(aTry) > opt.maxAbsA) {
+                guardOk = false;
+              }
+            }
+            if (guardOk && opt.stepMaxU > 0.0) {
+              if (StepScaledInfUpperBound(a, aTry, kktWeights, precBits) > opt.stepMaxU) {
+                guardOk = false;
+              }
+            }
+            if (guardOk && opt.nonnegativeGrid > 0) {
+              const double minProfile = MinAnsatzProfileOnUnitGrid(
+                  aTry, halfBinom, opt.nonnegativeGrid, precBits);
+              if (minProfile < -opt.nonnegativeTol) {
+                guardOk = false;
+              }
+            }
+            if (!guardOk) {
+              stepExp += 1;
+              continue;
+            }
+
             objTry = ObjectiveOnly(aTry, bessel, prePtr, opt.nmax, opt.kTerms, opt.useTail, precBits);
             if (arb_lt(objTry.raw(), state.objective.raw())) {
               accepted = true;
@@ -960,8 +1201,8 @@ int main(int argc, char** argv) {
             stepExp += 1;
           }
           if (!accepted) {
-            stepExp = opt.stepMinExp;
-            ApplyPow2Step(&aTry, &lambdaTry, a, lambda, deltaA, deltaLambda, stepExp, precBits);
+            kktSolveOk = false;
+            break;
           }
         } else {
           ApplyPow2Step(&aTry, &lambdaTry, a, lambda, deltaA, deltaLambda, 0, precBits);
@@ -987,6 +1228,13 @@ int main(int argc, char** argv) {
       std::cout << "K=" << opt.kTerms << "\n";
       std::cout << "precDps=" << opt.precDps << "\n";
       std::cout << "useTail=" << (opt.useTail ? "true" : "false") << "\n";
+      std::cout << "kktScaling=" << opt.kktScaling << "\n";
+      std::cout << "maxAbsA=" << opt.maxAbsA << "\n";
+      std::cout << "stepMaxU=" << opt.stepMaxU << "\n";
+      std::cout << "nonnegativeGrid=" << opt.nonnegativeGrid << "\n";
+      std::cout << "nonnegativeTol=" << opt.nonnegativeTol << "\n";
+      std::cout << "kktReg=" << opt.kktReg << "\n";
+      std::cout << "minIterations=" << opt.minIterations << "\n";
       std::cout << "converged=" << (converged ? "true" : "false") << "\n";
       std::cout << "kktSolveOk=" << (kktSolveOk ? "true" : "false") << "\n";
       std::cout << "iterations=" << iterationsDone << "\n";
@@ -995,6 +1243,11 @@ int main(int argc, char** argv) {
       std::cout << "lambda=" << ArbToString(lambda, opt.printDps) << "\n";
       std::cout << "resInfUpper=" << state.resInfUpper << "\n";
       std::cout << "constraintAbsUpper=" << state.constraintAbsUpper << "\n";
+      if (opt.nonnegativeGrid > 0) {
+        const ArbVec hb = BuildHalfBinomialCoefficients(pCount, precBits);
+        const double minProfile = MinAnsatzProfileOnUnitGrid(a, hb, opt.nonnegativeGrid, precBits);
+        std::cout << "minProfileGrid=" << minProfile << "\n";
+      }
       std::cout << "aCsv=" << VecToCsv(a, opt.printDps) << "\n";
 
       if (opt.derivatives) {
@@ -1049,6 +1302,13 @@ int main(int argc, char** argv) {
       std::cout << "K=" << opt.kTerms << "\n";
       std::cout << "precDps=" << opt.precDps << "\n";
       std::cout << "useTail=" << (opt.useTail ? "true" : "false") << "\n";
+      std::cout << "kktScaling=" << opt.kktScaling << "\n";
+      std::cout << "maxAbsA=" << opt.maxAbsA << "\n";
+      std::cout << "stepMaxU=" << opt.stepMaxU << "\n";
+      std::cout << "nonnegativeGrid=" << opt.nonnegativeGrid << "\n";
+      std::cout << "nonnegativeTol=" << opt.nonnegativeTol << "\n";
+      std::cout << "kktReg=" << opt.kktReg << "\n";
+      std::cout << "minIterations=" << opt.minIterations << "\n";
       std::cout << "derivatives=" << (opt.derivatives ? "true" : "false") << "\n";
       std::cout << "hessian=" << (opt.derivatives && opt.computeHessian ? "true" : "false") << "\n";
 
@@ -1056,6 +1316,11 @@ int main(int argc, char** argv) {
       std::cout << "tailObjective=" << ArbToString(tail.objective, opt.printDps) << "\n";
       std::cout << "objective=" << ArbToString(objective, opt.printDps) << "\n";
       std::cout << "nu2Candidate=" << ArbToString(nu2, opt.printDps) << "\n";
+      if (opt.nonnegativeGrid > 0) {
+        const ArbVec hb = BuildHalfBinomialCoefficients(pCount, precBits);
+        const double minProfile = MinAnsatzProfileOnUnitGrid(aInitial, hb, opt.nonnegativeGrid, precBits);
+        std::cout << "minProfileGrid=" << minProfile << "\n";
+      }
 
       if (opt.derivatives) {
         std::cout << "gradientCsv=" << VecToCsv(gradient, opt.printDps) << "\n";

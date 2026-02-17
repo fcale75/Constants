@@ -26,10 +26,17 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--prec-list", default="120,140,170", help="Comma list of precision digits.")
     p.add_argument("--print-dps", type=int, default=70)
     p.add_argument("--max-it", type=int, default=30)
+    p.add_argument("--min-it", type=int, default=1)
     p.add_argument("--tol", default="1e-26")
     p.add_argument("--constraint-tol", default="1e-26")
     p.add_argument("--damping", choices=["true", "false"], default="true")
     p.add_argument("--step-min-exp", type=int, default=20)
+    p.add_argument("--kkt-scaling", choices=["asymptotic", "none"], default="asymptotic")
+    p.add_argument("--max-abs-a", type=float, default=0.0)
+    p.add_argument("--step-max-u", type=float, default=0.0)
+    p.add_argument("--nonnegative-grid", type=int, default=0)
+    p.add_argument("--nonnegative-tol", type=float, default=0.0)
+    p.add_argument("--kkt-reg", type=float, default=0.0)
     p.add_argument("--log", choices=["true", "false"], default="false")
     p.add_argument(
         "--stability-threshold",
@@ -162,10 +169,17 @@ def run_stage(
         "--tail", "true",
         "--optimize", "true",
         "--max-it", str(args.max_it),
+        "--min-it", str(args.min_it),
         "--tol", str(args.tol),
         "--constraint-tol", str(args.constraint_tol),
         "--damping", args.damping,
         "--step-min-exp", str(args.step_min_exp),
+        "--kkt-scaling", str(args.kkt_scaling),
+        "--max-abs-a", str(args.max_abs_a),
+        "--step-max-u", str(args.step_max_u),
+        "--nonnegative-grid", str(args.nonnegative_grid),
+        "--nonnegative-tol", str(args.nonnegative_tol),
+        "--kkt-reg", str(args.kkt_reg),
         "--log", args.log,
     ]
     proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
@@ -313,7 +327,14 @@ def main() -> int:
             "stabilityThreshold": str(stability_threshold),
             "requireConsecutive": require_consecutive,
             "stabilityMode": args.stability_mode,
+            "kktScaling": args.kkt_scaling,
+            "maxAbsA": args.max_abs_a,
+            "stepMaxU": args.step_max_u,
+            "nonnegativeGrid": args.nonnegative_grid,
+            "nonnegativeTol": args.nonnegative_tol,
+            "kktReg": args.kkt_reg,
             "initSource": init_source,
+            "minIt": args.min_it,
         },
         "rows": rows,
         "recommendedIndex": recommended_idx,

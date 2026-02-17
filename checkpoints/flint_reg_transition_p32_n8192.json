@@ -1,0 +1,60 @@
+{
+  "timestamp": "2026-02-17T06:32:55.232372+00:00",
+  "config": {
+    "P": 32,
+    "Nmax": 8192,
+    "K": 64,
+    "precDps": 260,
+    "maxIt": 30,
+    "tol": "1e-24",
+    "constraintTol": "1e-30",
+    "damping": true,
+    "stepMinExp": 35,
+    "kktScaling": "asymptotic",
+    "nonnegativeGrid": 200,
+    "nonnegativeTol": 1e-18,
+    "startSource": "checkpoints/flint_bootstrap_records_p50_candidate.json (P=32)"
+  },
+  "rows": [
+    {
+      "kktReg": "1e-18",
+      "converged": false,
+      "kktSolveOk": true,
+      "iterations": 30,
+      "resInfUpper": "2.08996e-12",
+      "maxAbsA": "9.860E-1",
+      "objectivePrefix": "0.57463960715151488402098419",
+      "timeSec": "93.0264"
+    },
+    {
+      "kktReg": "1e-20",
+      "converged": false,
+      "kktSolveOk": true,
+      "iterations": 30,
+      "resInfUpper": "1.48453e-12",
+      "maxAbsA": "9.860E-1",
+      "objectivePrefix": "0.57463960715151488402088674",
+      "timeSec": "93.2035"
+    },
+    {
+      "kktReg": "1e-22",
+      "converged": false,
+      "kktSolveOk": true,
+      "iterations": 30,
+      "resInfUpper": "2.64564e-13",
+      "maxAbsA": "9.860E-1",
+      "objectivePrefix": "0.57463960715151488402077746",
+      "timeSec": "93.2669"
+    },
+    {
+      "kktReg": "0",
+      "converged": true,
+      "kktSolveOk": true,
+      "iterations": 3,
+      "resInfUpper": "1.15033e-35",
+      "maxAbsA": "9.240E+12",
+      "objectivePrefix": "0.57463960715151488390727116",
+      "timeSec": "35.4795"
+    }
+  ]
+}

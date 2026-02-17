@@ -31,10 +31,17 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--prec-dps", type=int, default=120)
     p.add_argument("--print-dps", type=int, default=70)
     p.add_argument("--max-it", type=int, default=30)
+    p.add_argument("--min-it", type=int, default=1)
     p.add_argument("--tol", default="1e-24")
     p.add_argument("--constraint-tol", default="1e-24")
     p.add_argument("--damping", choices=["true", "false"], default="true")
     p.add_argument("--step-min-exp", type=int, default=20)
+    p.add_argument("--kkt-scaling", choices=["asymptotic", "none"], default="asymptotic")
+    p.add_argument("--max-abs-a", type=float, default=0.0)
+    p.add_argument("--step-max-u", type=float, default=0.0)
+    p.add_argument("--nonnegative-grid", type=int, default=0)
+    p.add_argument("--nonnegative-tol", type=float, default=0.0)
+    p.add_argument("--kkt-reg", type=float, default=0.0)
     p.add_argument("--log", choices=["true", "false"], default="false")
     p.add_argument("--records", default=str(DEFAULT_RECORDS))
     p.add_argument("--no-save", action="store_true")
@@ -172,10 +179,17 @@ def run_stage(coeffs: list[Decimal], stage: dict, args: argparse.Namespace) -> d
         "--tail", "true",
         "--optimize", "true",
         "--max-it", str(stage["maxIt"]),
+        "--min-it", str(args.min_it),
         "--tol", str(stage["tol"]),
         "--constraint-tol", str(stage["constraintTol"]),
         "--damping", args.damping,
         "--step-min-exp", str(stage["stepMinExp"]),
+        "--kkt-scaling", str(args.kkt_scaling),
+        "--max-abs-a", str(args.max_abs_a),
+        "--step-max-u", str(args.step_max_u),
+        "--nonnegative-grid", str(args.nonnegative_grid),
+        "--nonnegative-tol", str(args.nonnegative_tol),
+        "--kkt-reg", str(args.kkt_reg),
         "--log", args.log,
     ]
     proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
@@ -366,9 +380,16 @@ def main() -> int:
                 "K": stage_used["K"],
                 "precDps": stage_used["precDps"],
                 "maxIt": stage_used["maxIt"],
+                "minIt": args.min_it,
                 "tol": str(stage_used["tol"]),
                 "constraintTol": str(stage_used["constraintTol"]),
                 "damping": args.damping,
+                "kktScaling": args.kkt_scaling,
+                "maxAbsA": args.max_abs_a,
+                "stepMaxU": args.step_max_u,
+                "nonnegativeGrid": args.nonnegative_grid,
+                "nonnegativeTol": args.nonnegative_tol,
+                "kktReg": args.kkt_reg,
                 "stepMinExp": stage_used["stepMinExp"],
             },
             "result": {
