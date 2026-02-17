@@ -21,12 +21,16 @@ It computes:
 - finite + tail gradient
 - finite + tail Hessian
 - total objective and `sqrt(objective)`
+- constrained Newton optimization with damping
+- staged continuation via `tools/run_flint_bootstrap.py`
 
 Utility scripts:
 - `tools/build_flint_cpp.sh`
 - `tools/run_flint_objective.sh`
 - `tools/test_flint_objective.sh`
 - `tools/test_flint_derivatives.sh`
+- `tools/test_flint_optimize_smoke.sh`
+- `tools/run_flint_bootstrap.py`
 
 Current parity status:
 - Matches known objective values for:
@@ -35,6 +39,7 @@ Current parity status:
   to the printed precision.
 - Matches WL objective/gradient/Hessian at a fixed `P=4` coefficient vector
   with max absolute errors around `1e-70` (objective/gradient) and `1e-69` (Hessian).
+- Newton continuation reproduces the expected `P=1,2,4,8` trajectory in FLINT.
 
 ## Next implementation steps
 
@@ -48,10 +53,10 @@ Current parity status:
    - thread parallelism over `(i,l)` blocks
    - benchmark memory/compute tradeoffs for pairwise basis products
 
-3. Add constrained Newton driver in C++:
-   - variable elimination or projected coordinates for `sum a_j = 1`
-   - damping / line search
-   - warm-start continuation in `P` (`+4`, `+8`, then larger steps if stable)
+3. Harden optimization for large `P`:
+   - improve conditioning strategy (projected coordinates or regularized KKT)
+   - smarter precision scheduling across iterations/stages
+   - failure recovery (retry with higher precision / smaller step floor)
 
 4. Add benchmarking harness:
    - per-stage timing for finite/tail grad/hess

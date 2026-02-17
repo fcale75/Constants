@@ -1,5 +1,6 @@
 #include <flint/arb.h>
 #include <flint/arb_hypgeom.h>
+#include <flint/arb_mat.h>
 #include <flint/flint.h>
 
 #include <chrono>
@@ -70,6 +71,15 @@ struct Options {
   bool useTail = true;
   bool derivatives = false;
   bool computeHessian = true;
+  bool optimize = false;
+  slong maxIterations = 30;
+  double tolerance = 1e-24;
+  double constraintTolerance = 1e-24;
+  bool damping = true;
+  slong stepMinExp = 20;  // minimum step = 2^-stepMinExp
+  bool log = true;
+  bool hasInitialLambda = false;
+  std::string initialLambda;
 };
 
 struct FiniteEval {
@@ -91,12 +101,24 @@ struct TailEval {
   ArbMat hessian;
 };
 
+struct EvalState {
+  ArbNum objective;
+  ArbVec gradient;
+  ArbMat hessian;
+  ArbNum constraint;
+  double resInfUpper = 0.0;
+  double constraintAbsUpper = 0.0;
+};
+
 [[noreturn]] void UsageAndExit(const char* argv0) {
   std::cerr
       << "Usage:\n"
       << "  " << argv0
       << " --coeffs a0,a1,... [--nmax 256] [--k 32] [--prec-dps 120] [--print-dps 60]"
-      << " [--tail true|false] [--derivatives true|false] [--hessian true|false]\n";
+      << " [--tail true|false] [--derivatives true|false] [--hessian true|false]"
+      << " [--optimize true|false] [--max-it 30] [--tol 1e-24] [--constraint-tol 1e-24]"
+      << " [--damping true|false] [--step-min-exp 20] [--log true|false]"
+      << " [--initial-lambda value]\n";
   std::exit(1);
 }
 
@@ -173,6 +195,47 @@ Options ParseArgs(int argc, char** argv) {
       opt.computeHessian = ParseBool(argv[++i]);
       continue;
     }
+    if (arg == "--optimize") {
+      if (i + 1 >= argc) UsageAndExit(argv[0]);
+      opt.optimize = ParseBool(argv[++i]);
+      continue;
+    }
+    if (arg == "--max-it") {
+      if (i + 1 >= argc) UsageAndExit(argv[0]);
+      opt.maxIterations = std::stol(argv[++i]);
+      continue;
+    }
+    if (arg == "--tol") {
+      if (i + 1 >= argc) UsageAndExit(argv[0]);
+      opt.tolerance = std::stod(argv[++i]);
+      continue;
+    }
+    if (arg == "--constraint-tol") {
+      if (i + 1 >= argc) UsageAndExit(argv[0]);
+      opt.constraintTolerance = std::stod(argv[++i]);
+      continue;
+    }
+    if (arg == "--damping") {
+      if (i + 1 >= argc) UsageAndExit(argv[0]);
+      opt.damping = ParseBool(argv[++i]);
+      continue;
+    }
+    if (arg == "--step-min-exp") {
+      if (i + 1 >= argc) UsageAndExit(argv[0]);
+      opt.stepMinExp = std::stol(argv[++i]);
+      continue;
+    }
+    if (arg == "--log") {
+      if (i + 1 >= argc) UsageAndExit(argv[0]);
+      opt.log = ParseBool(argv[++i]);
+      continue;
+    }
+    if (arg == "--initial-lambda") {
+      if (i + 1 >= argc) UsageAndExit(argv[0]);
+      opt.hasInitialLambda = true;
+      opt.initialLambda = argv[++i];
+      continue;
+    }
     if (arg == "--help" || arg == "-h") {
       UsageAndExit(argv[0]);
     }
@@ -192,6 +255,15 @@ Options ParseArgs(int argc, char** argv) {
   }
   if (opt.precDps <= 0 || opt.printDps <= 0) {
     throw std::runtime_error("Precision settings must be positive");
+  }
+  if (opt.maxIterations <= 0) {
+    throw std::runtime_error("--max-it must be positive");
+  }
+  if (opt.tolerance <= 0 || opt.constraintTolerance <= 0) {
+    throw std::runtime_error("Tolerances must be positive");
+  }
+  if (opt.stepMinExp < 0 || opt.stepMinExp > 60) {
+    throw std::runtime_error("--step-min-exp must be between 0 and 60");
   }
 
   return opt;
@@ -610,6 +682,186 @@ void AddMatrixInPlace(ArbMat* base, const ArbMat& add, slong precBits) {
   }
 }
 
+ArbNum SumVector(const ArbVec& a, slong precBits) {
+  ArbNum sum;
+  arb_zero(sum.raw());
+  for (const auto& v : a) {
+    arb_add(sum.raw(), sum.raw(), v.raw(), precBits);
+  }
+  return sum;
+}
+
+double AbsUpperBound(const ArbNum& x) {
+  mag_t m;
+  mag_init(m);
+  arb_get_mag(m, x.raw());
+  const double out = mag_get_d(m);
+  mag_clear(m);
+  return out;
+}
+
+double ResidualInfUpperBound(const ArbVec& grad, const ArbNum& lambda, slong precBits) {
+  ArbNum tmp;
+  mag_t cur, mx;
+  mag_init(cur);
+  mag_init(mx);
+  mag_zero(mx);
+
+  for (const auto& g : grad) {
+    arb_sub(tmp.raw(), g.raw(), lambda.raw(), precBits);
+    arb_abs(tmp.raw(), tmp.raw());
+    arb_get_mag(cur, tmp.raw());
+    if (mag_cmp(cur, mx) > 0) {
+      mag_set(mx, cur);
+    }
+  }
+
+  const double out = mag_get_d(mx);
+  mag_clear(cur);
+  mag_clear(mx);
+  return out;
+}
+
+ArbNum MeanVector(const ArbVec& a, slong precBits) {
+  ArbNum mean = SumVector(a, precBits);
+  arb_div_ui(mean.raw(), mean.raw(), static_cast<ulong>(a.size()), precBits);
+  return mean;
+}
+
+ArbNum ObjectiveOnly(
+    const ArbVec& a,
+    const std::vector<std::vector<ArbNum>>& bessel,
+    const TailPrecompute* pre,
+    slong nmax,
+    slong kTerms,
+    bool useTail,
+    slong precBits) {
+  FiniteEval f = EvaluateFinite(a, bessel, nmax, false, false, precBits);
+  TailEval t;
+  if (useTail && pre != nullptr) {
+    t = EvaluateTail(a, *pre, kTerms, false, false, precBits);
+  }
+  ArbNum obj;
+  arb_add(obj.raw(), f.objective.raw(), t.objective.raw(), precBits);
+  return obj;
+}
+
+EvalState EvaluateState(
+    const ArbVec& a,
+    const ArbNum& lambda,
+    const std::vector<std::vector<ArbNum>>& bessel,
+    const TailPrecompute* pre,
+    slong nmax,
+    slong kTerms,
+    bool useTail,
+    slong precBits) {
+  EvalState out;
+
+  FiniteEval f = EvaluateFinite(a, bessel, nmax, true, true, precBits);
+  out.gradient = f.gradient;
+  out.hessian = f.hessian;
+
+  TailEval t;
+  if (useTail && pre != nullptr) {
+    t = EvaluateTail(a, *pre, kTerms, true, true, precBits);
+    AddVectorInPlace(&out.gradient, t.gradient, precBits);
+    AddMatrixInPlace(&out.hessian, t.hessian, precBits);
+  }
+
+  arb_add(out.objective.raw(), f.objective.raw(), t.objective.raw(), precBits);
+
+  ArbNum sumA = SumVector(a, precBits);
+  arb_set_ui(out.constraint.raw(), 1);
+  arb_sub(out.constraint.raw(), out.constraint.raw(), sumA.raw(), precBits);
+
+  out.resInfUpper = ResidualInfUpperBound(out.gradient, lambda, precBits);
+  out.constraintAbsUpper = AbsUpperBound(out.constraint);
+  return out;
+}
+
+bool SolveKktStep(
+    const ArbMat& hessian,
+    const ArbVec& grad,
+    const ArbNum& lambda,
+    const ArbNum& constraint,
+    ArbVec* deltaA,
+    ArbNum* deltaLambda,
+    slong precBits) {
+  const slong p = static_cast<slong>(grad.size());
+  const slong m = p + 1;
+
+  arb_mat_t A, B, X;
+  arb_mat_init(A, m, m);
+  arb_mat_init(B, m, 1);
+  arb_mat_init(X, m, 1);
+
+  arb_mat_zero(A);
+  arb_mat_zero(B);
+
+  for (slong i = 0; i < p; ++i) {
+    for (slong j = 0; j < p; ++j) {
+      arb_set(arb_mat_entry(A, i, j), hessian[static_cast<std::size_t>(i)][static_cast<std::size_t>(j)].raw());
+    }
+    arb_set_si(arb_mat_entry(A, i, p), -1);
+    arb_set_si(arb_mat_entry(A, p, i), -1);
+  }
+  arb_zero(arb_mat_entry(A, p, p));
+
+  ArbNum rhs;
+  for (slong i = 0; i < p; ++i) {
+    arb_sub(rhs.raw(), grad[static_cast<std::size_t>(i)].raw(), lambda.raw(), precBits);
+    arb_neg(rhs.raw(), rhs.raw());
+    arb_set(arb_mat_entry(B, i, 0), rhs.raw());
+  }
+  arb_neg(rhs.raw(), constraint.raw());
+  arb_set(arb_mat_entry(B, p, 0), rhs.raw());
+
+  const int ok = arb_mat_solve(X, A, B, precBits);
+
+  if (ok) {
+    deltaA->assign(static_cast<std::size_t>(p), ArbNum());
+    for (slong i = 0; i < p; ++i) {
+      arb_get_mid_arb((*deltaA)[static_cast<std::size_t>(i)].raw(), arb_mat_entry(X, i, 0));
+    }
+    arb_get_mid_arb(deltaLambda->raw(), arb_mat_entry(X, p, 0));
+  }
+
+  arb_mat_clear(A);
+  arb_mat_clear(B);
+  arb_mat_clear(X);
+  return ok != 0;
+}
+
+void ApplyPow2Step(
+    ArbVec* aOut,
+    ArbNum* lambdaOut,
+    const ArbVec& a,
+    const ArbNum& lambda,
+    const ArbVec& deltaA,
+    const ArbNum& deltaLambda,
+    slong stepExp,
+    slong precBits) {
+  aOut->assign(a.size(), ArbNum());
+  ArbNum scaled;
+  for (std::size_t i = 0; i < a.size(); ++i) {
+    arb_mul_2exp_si(scaled.raw(), deltaA[i].raw(), -stepExp);
+    arb_add((*aOut)[i].raw(), a[i].raw(), scaled.raw(), precBits);
+  }
+  arb_mul_2exp_si(scaled.raw(), deltaLambda.raw(), -stepExp);
+  arb_add(lambdaOut->raw(), lambda.raw(), scaled.raw(), precBits);
+}
+
+void ProjectToConstraint(ArbVec* a, slong precBits) {
+  ArbNum sum = SumVector(*a, precBits);
+  ArbNum diff;
+  arb_set_ui(diff.raw(), 1);
+  arb_sub(diff.raw(), diff.raw(), sum.raw(), precBits);  // 1 - sum
+  arb_div_ui(diff.raw(), diff.raw(), static_cast<ulong>(a->size()), precBits);
+  for (auto& v : *a) {
+    arb_add(v.raw(), v.raw(), diff.raw(), precBits);
+  }
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -617,8 +869,10 @@ int main(int argc, char** argv) {
     const Options opt = ParseArgs(argc, argv);
     const slong precBits = DigitsToBits(opt.precDps);
 
-    const ArbVec a = ParseCoefficients(opt.coeffStrings, precBits);
-    const std::size_t pCount = a.size();
+    const ArbVec aInitial = ParseCoefficients(opt.coeffStrings, precBits);
+    const std::size_t pCount = aInitial.size();
+    TailPrecompute pre;
+    const TailPrecompute* prePtr = nullptr;
 
     const auto t0 = std::chrono::steady_clock::now();
 
@@ -626,83 +880,195 @@ int main(int argc, char** argv) {
     const auto bessel = BuildBesselBlockTable(pCount, opt.nmax, precBits);
     const auto tBesselEnd = std::chrono::steady_clock::now();
 
-    const auto tFiniteStart = std::chrono::steady_clock::now();
-    FiniteEval finite = EvaluateFinite(a, bessel, opt.nmax, opt.derivatives, opt.derivatives && opt.computeHessian, precBits);
-    const auto tFiniteEnd = std::chrono::steady_clock::now();
-
-    TailEval tail;
-    std::chrono::steady_clock::time_point tTailPreStart, tTailPreEnd, tTailEvalStart, tTailEvalEnd;
+    const auto tTailPreStart = std::chrono::steady_clock::now();
     if (opt.useTail) {
-      tTailPreStart = std::chrono::steady_clock::now();
-      const TailPrecompute pre = BuildTailPrecompute(pCount, opt.nmax, opt.kTerms, precBits);
-      tTailPreEnd = std::chrono::steady_clock::now();
-
-      tTailEvalStart = std::chrono::steady_clock::now();
-      tail = EvaluateTail(a, pre, opt.kTerms, opt.derivatives, opt.derivatives && opt.computeHessian, precBits);
-      tTailEvalEnd = std::chrono::steady_clock::now();
+      pre = BuildTailPrecompute(pCount, opt.nmax, opt.kTerms, precBits);
+      prePtr = &pre;
     }
+    const auto tTailPreEnd = std::chrono::steady_clock::now();
 
-    ArbNum objective;
-    arb_add(objective.raw(), finite.objective.raw(), tail.objective.raw(), precBits);
-    ArbNum nu2 = SqrtArb(objective, precBits);
-
-    ArbVec gradient;
-    ArbMat hessian;
-    if (opt.derivatives) {
-      gradient = finite.gradient;
-      if (opt.useTail) {
-        AddVectorInPlace(&gradient, tail.gradient, precBits);
-      }
-
-      if (opt.computeHessian) {
-        hessian = finite.hessian;
-        if (opt.useTail) {
-          AddMatrixInPlace(&hessian, tail.hessian, precBits);
-        }
-      }
-    }
-
-    const auto t1 = std::chrono::steady_clock::now();
-
-    const double elapsed =
-        std::chrono::duration_cast<std::chrono::duration<double>>(t1 - t0).count();
     const double tBessel =
         std::chrono::duration_cast<std::chrono::duration<double>>(tBesselEnd - tBesselStart).count();
-    const double tFinite =
-        std::chrono::duration_cast<std::chrono::duration<double>>(tFiniteEnd - tFiniteStart).count();
+    const double tTailPre =
+        std::chrono::duration_cast<std::chrono::duration<double>>(tTailPreEnd - tTailPreStart).count();
 
-    double tTailPre = 0.0;
-    double tTailEval = 0.0;
-    if (opt.useTail) {
-      tTailPre = std::chrono::duration_cast<std::chrono::duration<double>>(tTailPreEnd - tTailPreStart).count();
-      tTailEval = std::chrono::duration_cast<std::chrono::duration<double>>(tTailEvalEnd - tTailEvalStart).count();
-    }
+    if (opt.optimize) {
+      ArbVec a = aInitial;
+      ProjectToConstraint(&a, precBits);
 
-    std::cout << "P=" << pCount << "\n";
-    std::cout << "Nmax=" << opt.nmax << "\n";
-    std::cout << "K=" << opt.kTerms << "\n";
-    std::cout << "precDps=" << opt.precDps << "\n";
-    std::cout << "useTail=" << (opt.useTail ? "true" : "false") << "\n";
-    std::cout << "derivatives=" << (opt.derivatives ? "true" : "false") << "\n";
-    std::cout << "hessian=" << (opt.derivatives && opt.computeHessian ? "true" : "false") << "\n";
-
-    std::cout << "finiteObjective=" << ArbToString(finite.objective, opt.printDps) << "\n";
-    std::cout << "tailObjective=" << ArbToString(tail.objective, opt.printDps) << "\n";
-    std::cout << "objective=" << ArbToString(objective, opt.printDps) << "\n";
-    std::cout << "nu2Candidate=" << ArbToString(nu2, opt.printDps) << "\n";
-
-    if (opt.derivatives) {
-      std::cout << "gradientCsv=" << VecToCsv(gradient, opt.printDps) << "\n";
-      if (opt.computeHessian) {
-        std::cout << "hessianRows=" << MatToRowCsv(hessian, opt.printDps) << "\n";
+      ArbNum lambda;
+      if (opt.hasInitialLambda) {
+        if (arb_set_str(lambda.raw(), opt.initialLambda.c_str(), precBits) != 0) {
+          throw std::runtime_error("Failed to parse --initial-lambda");
+        }
+      } else {
+        FiniteEval f0 = EvaluateFinite(a, bessel, opt.nmax, true, false, precBits);
+        ArbVec g0 = f0.gradient;
+        if (opt.useTail) {
+          TailEval t0 = EvaluateTail(a, pre, opt.kTerms, true, false, precBits);
+          AddVectorInPlace(&g0, t0.gradient, precBits);
+        }
+        lambda = MeanVector(g0, precBits);
       }
-    }
 
-    std::cout << "timeBessel=" << tBessel << "\n";
-    std::cout << "timeFinite=" << tFinite << "\n";
-    std::cout << "timeTailPrecompute=" << tTailPre << "\n";
-    std::cout << "timeTailEval=" << tTailEval << "\n";
-    std::cout << "timeSec=" << elapsed << "\n";
+      bool converged = false;
+      bool kktSolveOk = true;
+      slong iterationsDone = 0;
+      EvalState state;
+
+      const auto tOptStart = std::chrono::steady_clock::now();
+      for (slong it = 1; it <= opt.maxIterations; ++it) {
+        state = EvaluateState(a, lambda, bessel, prePtr, opt.nmax, opt.kTerms, opt.useTail, precBits);
+        iterationsDone = it;
+
+        if (opt.log) {
+          std::cout
+              << "iter=" << it
+              << " objective=" << ArbToString(state.objective, 22)
+              << " resInfUpper=" << state.resInfUpper
+              << " constraintAbsUpper=" << state.constraintAbsUpper
+              << "\n";
+        }
+
+        if (state.resInfUpper <= opt.tolerance &&
+            state.constraintAbsUpper <= opt.constraintTolerance) {
+          converged = true;
+          break;
+        }
+
+        ArbVec deltaA;
+        ArbNum deltaLambda;
+        if (!SolveKktStep(state.hessian, state.gradient, lambda, state.constraint, &deltaA, &deltaLambda, precBits)) {
+          kktSolveOk = false;
+          break;
+        }
+
+        slong stepExp = 0;
+        ArbVec aTry;
+        ArbNum lambdaTry;
+        ArbNum objTry;
+        bool accepted = false;
+
+        if (opt.damping) {
+          while (stepExp <= opt.stepMinExp) {
+            ApplyPow2Step(&aTry, &lambdaTry, a, lambda, deltaA, deltaLambda, stepExp, precBits);
+            objTry = ObjectiveOnly(aTry, bessel, prePtr, opt.nmax, opt.kTerms, opt.useTail, precBits);
+            if (arb_lt(objTry.raw(), state.objective.raw())) {
+              accepted = true;
+              break;
+            }
+            stepExp += 1;
+          }
+          if (!accepted) {
+            stepExp = opt.stepMinExp;
+            ApplyPow2Step(&aTry, &lambdaTry, a, lambda, deltaA, deltaLambda, stepExp, precBits);
+          }
+        } else {
+          ApplyPow2Step(&aTry, &lambdaTry, a, lambda, deltaA, deltaLambda, 0, precBits);
+          stepExp = 0;
+        }
+
+        a = std::move(aTry);
+        lambda = std::move(lambdaTry);
+      }
+      const auto tOptEnd = std::chrono::steady_clock::now();
+      const double tOptimize =
+          std::chrono::duration_cast<std::chrono::duration<double>>(tOptEnd - tOptStart).count();
+
+      state = EvaluateState(a, lambda, bessel, prePtr, opt.nmax, opt.kTerms, opt.useTail, precBits);
+      ArbNum nu2 = SqrtArb(state.objective, precBits);
+      const auto t1 = std::chrono::steady_clock::now();
+      const double elapsed =
+          std::chrono::duration_cast<std::chrono::duration<double>>(t1 - t0).count();
+
+      std::cout << "mode=optimize\n";
+      std::cout << "P=" << pCount << "\n";
+      std::cout << "Nmax=" << opt.nmax << "\n";
+      std::cout << "K=" << opt.kTerms << "\n";
+      std::cout << "precDps=" << opt.precDps << "\n";
+      std::cout << "useTail=" << (opt.useTail ? "true" : "false") << "\n";
+      std::cout << "converged=" << (converged ? "true" : "false") << "\n";
+      std::cout << "kktSolveOk=" << (kktSolveOk ? "true" : "false") << "\n";
+      std::cout << "iterations=" << iterationsDone << "\n";
+      std::cout << "objective=" << ArbToString(state.objective, opt.printDps) << "\n";
+      std::cout << "nu2Candidate=" << ArbToString(nu2, opt.printDps) << "\n";
+      std::cout << "lambda=" << ArbToString(lambda, opt.printDps) << "\n";
+      std::cout << "resInfUpper=" << state.resInfUpper << "\n";
+      std::cout << "constraintAbsUpper=" << state.constraintAbsUpper << "\n";
+      std::cout << "aCsv=" << VecToCsv(a, opt.printDps) << "\n";
+
+      if (opt.derivatives) {
+        std::cout << "gradientCsv=" << VecToCsv(state.gradient, opt.printDps) << "\n";
+        if (opt.computeHessian) {
+          std::cout << "hessianRows=" << MatToRowCsv(state.hessian, opt.printDps) << "\n";
+        }
+      }
+
+      std::cout << "timeBessel=" << tBessel << "\n";
+      std::cout << "timeTailPrecompute=" << tTailPre << "\n";
+      std::cout << "timeOptimize=" << tOptimize << "\n";
+      std::cout << "timeSec=" << elapsed << "\n";
+    } else {
+      const auto tEvalStart = std::chrono::steady_clock::now();
+      FiniteEval finite = EvaluateFinite(aInitial, bessel, opt.nmax, opt.derivatives, opt.derivatives && opt.computeHessian, precBits);
+      TailEval tail;
+      if (opt.useTail) {
+        tail = EvaluateTail(aInitial, pre, opt.kTerms, opt.derivatives, opt.derivatives && opt.computeHessian, precBits);
+      }
+      const auto tEvalEnd = std::chrono::steady_clock::now();
+      const double tEval =
+          std::chrono::duration_cast<std::chrono::duration<double>>(tEvalEnd - tEvalStart).count();
+
+      ArbNum objective;
+      arb_add(objective.raw(), finite.objective.raw(), tail.objective.raw(), precBits);
+      ArbNum nu2 = SqrtArb(objective, precBits);
+
+      ArbVec gradient;
+      ArbMat hessian;
+      if (opt.derivatives) {
+        gradient = finite.gradient;
+        if (opt.useTail) {
+          AddVectorInPlace(&gradient, tail.gradient, precBits);
+        }
+
+        if (opt.computeHessian) {
+          hessian = finite.hessian;
+          if (opt.useTail) {
+            AddMatrixInPlace(&hessian, tail.hessian, precBits);
+          }
+        }
+      }
+
+      const auto t1 = std::chrono::steady_clock::now();
+      const double elapsed =
+          std::chrono::duration_cast<std::chrono::duration<double>>(t1 - t0).count();
+
+      std::cout << "mode=evaluate\n";
+      std::cout << "P=" << pCount << "\n";
+      std::cout << "Nmax=" << opt.nmax << "\n";
+      std::cout << "K=" << opt.kTerms << "\n";
+      std::cout << "precDps=" << opt.precDps << "\n";
+      std::cout << "useTail=" << (opt.useTail ? "true" : "false") << "\n";
+      std::cout << "derivatives=" << (opt.derivatives ? "true" : "false") << "\n";
+      std::cout << "hessian=" << (opt.derivatives && opt.computeHessian ? "true" : "false") << "\n";
+
+      std::cout << "finiteObjective=" << ArbToString(finite.objective, opt.printDps) << "\n";
+      std::cout << "tailObjective=" << ArbToString(tail.objective, opt.printDps) << "\n";
+      std::cout << "objective=" << ArbToString(objective, opt.printDps) << "\n";
+      std::cout << "nu2Candidate=" << ArbToString(nu2, opt.printDps) << "\n";
+
+      if (opt.derivatives) {
+        std::cout << "gradientCsv=" << VecToCsv(gradient, opt.printDps) << "\n";
+        if (opt.computeHessian) {
+          std::cout << "hessianRows=" << MatToRowCsv(hessian, opt.printDps) << "\n";
+        }
+      }
+
+      std::cout << "timeBessel=" << tBessel << "\n";
+      std::cout << "timeTailPrecompute=" << tTailPre << "\n";
+      std::cout << "timeEval=" << tEval << "\n";
+      std::cout << "timeSec=" << elapsed << "\n";
+    }
 
     flint_cleanup();
     return 0;
