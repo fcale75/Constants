@@ -1,0 +1,200 @@
+{
+  "meta": {
+    "timestampStart": "2026-02-17T12:59:56.199111+00:00",
+    "seedSource": "records:flint_bootstrap_records_p32_N16384_guard2.json:P32",
+    "stageList": [
+      {
+        "p": 32,
+        "nmax": 8192,
+        "k": 128,
+        "prec_dps": 340,
+        "max_it": 24,
+        "tol": "1e-20",
+        "constraint_tol": "1e-28",
+        "step_min_exp": 40
+      }
+    ],
+    "checkDeltas": {
+      "n": 8192,
+      "k": 64,
+      "prec": 60,
+      "maxIt": 10,
+      "tolDecades": 4,
+      "constraintTolDecades": 4
+    },
+    "escalation": {
+      "maxAttempts": 4,
+      "nMult": 1.5,
+      "kAdd": 16,
+      "precAdd": 20,
+      "maxItAdd": 6,
+      "stepMinExpAdd": 2,
+      "tolDecades": 1,
+      "constraintTolDecades": 1,
+      "regDecay": "0.1",
+      "regMin": "1e-30"
+    },
+    "expectedDigitsMap": {
+      "32": 40.0
+    },
+    "expectedDigitsSlope": 1.25,
+    "expectedDigitsIntercept": 0.0,
+    "expectedDigitsFloor": 20.0,
+    "coeffDigitsOffset": 8.0,
+    "minCoeffDigits": 24.0,
+    "global": {
+      "printDps": 120,
+      "minIt": 1,
+      "damping": "true",
+      "kktScaling": "asymptotic",
+      "kktRegInitial": "1e-22",
+      "maxAbsA": 0.0,
+      "stepMaxU": 0.0,
+      "nonnegativeGrid": 400,
+      "nonnegativeTol": 1e-28,
+      "log": "false"
+    }
+  },
+  "stages": [
+    {
+      "P": 32,
+      "expectedNu2Digits": 40.0,
+      "requiredCoeffDigits": 32.0,
+      "attempts": [
+        {
+          "attempt": 0,
+          "kktReg": "1.000E-22",
+          "baseStage": {
+            "p": 32,
+            "nmax": 12288,
+            "k": 144,
+            "prec_dps": 360,
+            "max_it": 30,
+            "tol": "1.000000E-21",
+            "constraint_tol": "1.000000E-29",
+            "step_min_exp": 42
+          },
+          "checkStage": {
+            "p": 32,
+            "nmax": 16384,
+            "k": 192,
+            "prec_dps": 400,
+            "max_it": 34,
+            "tol": "1.000000E-24",
+            "constraint_tol": "1.000000E-32",
+            "step_min_exp": 42
+          },
+          "base": {
+            "converged": false,
+            "kktSolveOk": true,
+            "iterations": "24",
+            "resInfUpper": "2.53925e-13",
+            "constraintAbsUpper": "9.33264e-302",
+            "timeSec": "229.645",
+            "objective": "0.574639607151514884020776421579009104132090610325706412167169933052956751765936730647701669814736183845300068537131081673",
+            "nu2Candidate": "0.758049871150648560032590146657459286608570891171706782488054931723427687691205217580517093958022470861177683059421421758"
+          },
+          "check": {
+            "converged": false,
+            "kktSolveOk": true,
+            "iterations": "34",
+            "resInfUpper": "2.37495e-14",
+            "constraintAbsUpper": "9.33264e-302",
+            "timeSec": "781.629",
+            "objective": "0.574639607151519004085045831820245738182570297590606165219919928018733759222093234155857171025124986242899198894633886245",
+            "nu2Candidate": "0.758049871150651277574289056494991639802397056208712274496987135093659199576173524159880672049897722217310051273027824870"
+          },
+          "drift": {
+            "nu2AbsDiff": "2.717541698909837532353193826165037005492008932203370231511884968306579363578091875251356132368213606403112E-15",
+            "objectiveAbsDiff": "4.120064269410241236634050479687264899753052749994965777007456156503508155501210388802397599130357502804572E-15",
+            "coeffInfAbsDiff": "1.4103748530837996763242100689787578241200701565986608911418139972676188464143190173911002212558451021247756985942312572E-7",
+            "nu2Digits": 14.565823783224188,
+            "objectiveDigits": 14.385096009298778,
+            "coeffDigits": 6.850665444089551
+          },
+          "targets": {
+            "expectedNu2Digits": 40.0,
+            "requiredCoeffDigits": 32.0
+          },
+          "passFlags": {
+            "baseConverged": false,
+            "baseKkt": true,
+            "checkConverged": false,
+            "checkKkt": true,
+            "nu2DigitsOk": false,
+            "coeffDigitsOk": false
+          },
+          "passed": false
+        },
+        {
+          "attempt": 1,
+          "kktReg": "1.000E-23",
+          "baseStage": {
+            "p": 32,
+            "nmax": 12288,
+            "k": 144,
+            "prec_dps": 360,
+            "max_it": 30,
+            "tol": "1.000000E-21",
+            "constraint_tol": "1.000000E-29",
+            "step_min_exp": 42
+          },
+          "checkStage": {
+            "p": 32,
+            "nmax": 20480,
+            "k": 208,
+            "prec_dps": 420,
+            "max_it": 40,
+            "tol": "1.000000E-25",
+            "constraint_tol": "1.000000E-33",
+            "step_min_exp": 44
+          },
+          "base": {
+            "converged": false,
+            "kktSolveOk": true,
+            "iterations": "30",
+            "resInfUpper": "4.05241e-14",
+            "constraintAbsUpper": "9.33264e-302",
+            "timeSec": "380.948",
+            "objective": "0.574639607151518197469789592180222067973463303374690277001508514601805133708122054888899424836328988750323312053364587543",
+            "nu2Candidate": "0.758049871150650745541182174443050625596276952471238805255640501719872374430003130007103081874148250730157626653706395139"
+          },
+          "check": {
+            "converged": false,
+            "kktSolveOk": true,
+            "iterations": "40",
+            "resInfUpper": "1.80856e-14",
+            "constraintAbsUpper": "9.33264e-302",
+            "timeSec": "1153.96",
+            "objective": "0.574639607151519291336924813056919333739872609552564991187501485049822380516010323109868080910626033020763633028502949569",
+            "nu2Candidate": "0.758049871150651467041954650326051032003888557018225688467171200186302498823785069460153136872058496036760165079866718023"
+          },
+          "drift": {
+            "nu2AbsDiff": "7.21500772475883000406407611604546986883211530698466430124393781939453050054997910245306602538426160322884E-16",
+            "objectiveAbsDiff": "1.093867135220876697265766409306177874714185992970448017246807888268220968656074297044270440320975138362026E-15",
+            "coeffInfAbsDiff": "4.296927607392686392348951713725483201858006078481923672122444571020965832711969263416275723093002466830828964592856604E-8",
+            "nu2Digits": 15.1417631995922,
+            "objectiveDigits": 14.96103542566679,
+            "coeffDigits": 7.366841963042819
+          },
+          "targets": {
+            "expectedNu2Digits": 40.0,
+            "requiredCoeffDigits": 32.0
+          },
+          "passFlags": {
+            "baseConverged": false,
+            "baseKkt": true,
+            "checkConverged": false,
+            "checkKkt": true,
+            "nu2DigitsOk": false,
+            "coeffDigitsOk": false
+          },
+          "passed": false
+        }
+      ],
+      "status": "failed"
+    }
+  ],
+  "overallStatus": "failed",
+  "timestamp": "2026-02-17T13:42:22.526599+00:00"
+}
